@@ -1,0 +1,14 @@
+version: 2
+
+updates:
+  # The actions in ci.yml are pinned to commit SHAs, which is what stops a moved
+  # tag from changing what CI runs — but a pin never expires on its own, so
+  # without this the pins quietly rot into unpatched versions. Dependabot bumps
+  # the SHA and the `# vX.Y.Z` comment together, as one reviewable diff.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

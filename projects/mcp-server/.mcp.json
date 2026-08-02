@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "modash": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/plugin/launch.mjs"
+      ],
+      "env": {
+        "MODASH_API_TOKEN": "${MODASH_API_TOKEN:-}",
+        "MODASH_CREDIT_BUDGET": "${MODASH_CREDIT_BUDGET:-5}",
+        "MODASH_RAW": "${MODASH_RAW:-false}",
+        "MODASH_RAW_BUDGET": "${MODASH_RAW_BUDGET:-50}"
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "modash-api-cookbook",
+  "description": "Runnable examples built on the Modash API, packaged so you can install them into Claude Code.",
+  "owner": {
+    "name": "Modash",
+    "url": "https://www.modash.io"
+  },
+  "plugins": [
+    {
+      "name": "modash-api-mcp",
+      "source": "./projects/mcp-server",
+      "description": "Creator search, profile reports with audience demographics, and brand collaboration history from the Modash API. Meters credit spend per call and enforces a per-session budget. Runs against synthetic fixtures with no token.",
+      "category": "data",
+      "tags": ["influencer-marketing", "creator-discovery", "social-media", "api"]
+    }
+  ]
+}

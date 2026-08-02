@@ -1,0 +1,44 @@
+{
+  "name": "modash-mcp-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An MCP server that exposes the Modash Discovery API to LLM clients, with credit metering, a per-session budget cap, and a mock mode that needs no token.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "modash-mcp-server": "dist/stdio.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/http.ts",
+    "dev:stdio": "tsx src/stdio.ts",
+    "start": "node dist/http.js",
+    "start:stdio": "node dist/stdio.js",
+    "inspect": "mcp-inspector --tui tsx src/stdio.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "build:mcpb": "node plugin/build-mcpb.mjs",
+    "verify:mcpb": "node plugin/verify-mcpb.mjs",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/express": "^2.0.0",
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/inspector": "^2.0.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.1",
+    "esbuild": "^0.25.12",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "yazl": "^3.3.1"
+  }
+}

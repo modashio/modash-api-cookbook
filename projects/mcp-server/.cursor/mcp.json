@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "modash": {
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/plugin/launch.mjs"
+      ],
+      "env": {
+        "MODASH_API_TOKEN": "${env:MODASH_API_TOKEN}",
+        "MODASH_CREDIT_BUDGET": "${env:MODASH_CREDIT_BUDGET}",
+        "MODASH_RAW": "${env:MODASH_RAW}",
+        "MODASH_RAW_BUDGET": "${env:MODASH_RAW_BUDGET}"
+      }
+    }
+  }
+}

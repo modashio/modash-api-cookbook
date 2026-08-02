@@ -1,0 +1,155 @@
+{
+  "manifest_version": "0.3",
+  "name": "modash-api-mcp",
+  "display_name": "Modash",
+  "version": "1.0.0",
+  "description": "Creator search, profile reports and brand collaboration history from the Modash API, with per-call credit metering and a session budget. Optional RAW API tools for live, unfiltered platform data.",
+  "long_description": "Gives Claude access to the Modash Discovery API: search Instagram, TikTok and YouTube creators by structured filters or by a description of their content, pull full profile reports including audience demographics and credibility, and look up brand collaboration history.\n\nModash bills per call, and some calls are far more expensive than others, so every paid tool reports what it just spent and how much of your session budget is left. A call that would breach the budget is refused before it is sent rather than reported after the fact.\n\nWithout a token it runs against synthetic fixtures, so you can try the tools and read the responses without an account.",
+  "author": {
+    "name": "Modash",
+    "url": "https://www.modash.io"
+  },
+  "homepage": "https://github.com/modashio/modash-api-cookbook/tree/main/projects/mcp-server",
+  "documentation": "https://docs.modash.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/modashio/modash-api-cookbook"
+  },
+  "license": "MIT",
+  "keywords": [
+    "modash",
+    "influencer-marketing",
+    "creator-discovery",
+    "instagram",
+    "tiktok",
+    "youtube"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.js"
+      ],
+      "env": {
+        "MODASH_API_TOKEN": "${user_config.api_token}",
+        "MODASH_CREDIT_BUDGET": "${user_config.credit_budget}",
+        "MODASH_RAW": "${user_config.enable_raw}",
+        "MODASH_RAW_BUDGET": "${user_config.raw_budget}"
+      }
+    }
+  },
+  "user_config": {
+    "api_token": {
+      "type": "string",
+      "title": "Modash API token",
+      "description": "From marketer.modash.io/developer. Leave blank to run against synthetic fixtures, which spends nothing and needs no account.",
+      "sensitive": true,
+      "required": false
+    },
+    "credit_budget": {
+      "type": "number",
+      "title": "Credit budget per session",
+      "description": "Hard ceiling on Modash credits this server may spend before it starts refusing paid calls. A full profile report costs 1 credit; a search costs 0.15.",
+      "default": 5,
+      "min": 0.15,
+      "required": false
+    },
+    "enable_raw": {
+      "type": "boolean",
+      "title": "Enable RAW API tools",
+      "description": "The RAW API is a separate Modash product from Discovery, metered in requests rather than credits. Leave this off unless your plan includes it; the six RAW tools will answer feature_not_available otherwise.",
+      "default": false,
+      "required": false
+    },
+    "raw_budget": {
+      "type": "number",
+      "title": "RAW request budget per session",
+      "description": "Hard ceiling on RAW requests before the server starts refusing them. RAW bills failed requests too, so this counts attempts.",
+      "default": 50,
+      "min": 1,
+      "required": false
+    }
+  },
+  "tools": [
+    {
+      "name": "modash_get_account",
+      "description": "Account credit balance, rate limits, and the session ledger. Free."
+    },
+    {
+      "name": "modash_find_creator",
+      "description": "Resolve a handle or name to a Modash userId. Free."
+    },
+    {
+      "name": "modash_lookup_dictionary",
+      "description": "Look up the location, interest, brand and language ids that search filters require. Free."
+    },
+    {
+      "name": "modash_lookup_ai_dictionary",
+      "description": "Look up brand, hashtag and mention values for AI Search filters. Free."
+    },
+    {
+      "name": "modash_search_creators",
+      "description": "Search creators by structured filters on the creator and their audience. 0.15 credits."
+    },
+    {
+      "name": "modash_ai_search_creators",
+      "description": "Find creators from a natural-language description of their content. 0.025 credits per result."
+    },
+    {
+      "name": "modash_find_lookalikes",
+      "description": "Find creators similar to ones you already know, across platforms. 0.025 credits per result."
+    },
+    {
+      "name": "modash_get_creator_report",
+      "description": "Full analysis of one creator: engagement, audience demographics, credibility, sponsored performance. 1 credit."
+    },
+    {
+      "name": "modash_compare_audience_overlap",
+      "description": "How much several creators' audiences overlap. 1 credit."
+    },
+    {
+      "name": "modash_list_collaborations",
+      "description": "Individual brand-sponsored posts with stats and disclosure type. 0.2 credits."
+    },
+    {
+      "name": "modash_summarise_collaborations",
+      "description": "Aggregate partnership history for a creator or brand. 0.2 credits."
+    },
+    {
+      "name": "modash_find_creators_by_email",
+      "description": "Reverse lookup: find the accounts behind a list of email addresses. 0.02 credits per match."
+    },
+    {
+      "name": "modash_raw_get_profile",
+      "description": "Live, unfiltered profile straight from the platform. 1 RAW request."
+    },
+    {
+      "name": "modash_raw_list_posts",
+      "description": "A creator's posts, reels, shorts, streams or tagged posts, live. 1 RAW request per page."
+    },
+    {
+      "name": "modash_raw_get_post",
+      "description": "One post with its current engagement counts. 1 RAW request."
+    },
+    {
+      "name": "modash_raw_list_comments",
+      "description": "Comments on a post, or replies to one comment. 1 RAW request per page."
+    },
+    {
+      "name": "modash_raw_search",
+      "description": "The platform's own creator or hashtag search, unranked by Modash. 1 RAW request."
+    },
+    {
+      "name": "modash_raw_browse",
+      "description": "Posts under a hashtag, a sound, or a YouTube playlist. 1 RAW request per page."
+    }
+  ],
+  "prompts_generated": true,
+  "compatibility": {
+    "runtimes": {
+      "node": ">=22.0.0"
+    }
+  }
+}

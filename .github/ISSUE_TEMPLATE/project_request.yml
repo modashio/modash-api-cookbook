@@ -1,0 +1,64 @@
+name: Suggest a project
+description: There's a workflow you'd like to see built end to end against the Modash API.
+labels: ['project request']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful projects here show **one workflow end to end** — a real thing someone
+        wants to build — rather than a tour of every endpoint. Tell us what you're trying to
+        build and we can work out whether a project is the right answer.
+
+        If you're mid-integration and stuck on something specific, [docs.modash.io](https://docs.modash.io)
+        and the [help centre](https://help.modash.io) will get you unstuck sooner than waiting
+        for a project to be written.
+
+        Maintainers building an accepted request: follow
+        [Adding a new project](https://github.com/modashio/modash-api-cookbook/blob/main/AGENTS.md#adding-a-new-project)
+        end to end — including the CI matrix, root README row, bug-report dropdown, and the
+        PR template's **New project** section.
+
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What's the workflow
+      description: Describe it as a job to be done, not as a list of endpoints.
+      placeholder: |
+        Given a list of creators we already work with, keep an eye on which competitor brands
+        they post for, and alert us when that changes.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: product
+    attributes:
+      label: Which part of the API does it involve
+      description: See the [product pages](https://www.modash.io/influencer-marketing-api) if you're not sure.
+      multiple: true
+      options:
+        - Discovery — search and dictionaries
+        - Discovery — AI Search
+        - Discovery — profile reports and audience data
+        - Discovery — Creator Lookalikes
+        - Discovery — Collaborations
+        - RAW API
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: gap
+    attributes:
+      label: What's hard about it today
+      description: What did you try, and where did the API reference stop being enough? This is the part that decides whether a project helps.
+      placeholder: |
+        The reference shows each endpoint on its own, but not how to sequence them without
+        burning a credit per creator per run.
+    validations:
+      required: true
+
+  - type: textarea
+    id: stack
+    attributes:
+      label: What are you building on
+      description: Optional. Projects here are TypeScript, but knowing your stack tells us which patterns are worth showing.

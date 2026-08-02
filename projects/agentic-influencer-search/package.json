@@ -1,0 +1,47 @@
+{
+  "name": "agentic-influencer-search",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "An agentic influencer search tool built on the Modash AI Search API",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail --names api,web --prefix-colors magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "tsx watch src/server/index.ts",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "NODE_ENV=production tsx src/server/index.ts",
+    "typecheck": "tsgo --noEmit",
+    "search": "tsx src/cli/search.ts",
+    "check-token": "tsx src/cli/check-token.ts",
+    "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\""
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.25",
+    "@ai-sdk/openai": "^4.0.25",
+    "@ai-sdk/react": "^4.0.47",
+    "@tanstack/react-query": "^5.101.4",
+    "ai": "^7.0.44",
+    "express": "^5.2.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "^4.0.4",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.0",
+    "@typescript/native-preview": "^7.0.0-dev.20260707.2",
+    "@vitejs/plugin-react": "^6.0.5",
+    "concurrently": "^10.0.4",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.0"
+  }
+}

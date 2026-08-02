@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# This repository is public, so every job below runs code written by whoever opened
+# the pull request. That is safe only while the jobs have nothing worth stealing:
+# no secrets, no write access, no publish step, and no project that needs an API
+# token to install, typecheck, test or build. The `guard` job re-checks those
+# invariants on every run so they survive the next edit to this file.
+#
+# Deliberately absent, and worth keeping absent:
+#   - the pull_request_target and workflow_run triggers, which would run this same
+#     untrusted code with a privileged token
+#   - any `secrets.*` reference
+#   - any `write` permission
+#
+# A workflow that no pull request can trigger — a release on a tag, say — is running
+# reviewed code and may have both. It lives in its own file, not in this one.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  guard:
+    name: supply chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # The tests run first: they poison a copy of this file in every way the audit
+      # claims to catch, so a passing audit below means something.
+      - run: node --test .github/scripts/audit-ci.test.mjs
+      - run: node .github/scripts/audit-ci.mjs
+
+  project:
+    name: ${{ matrix.project }}
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - agentic-influencer-search
+          - mcp-server
+    defaults:
+      run:
+        working-directory: projects/${{ matrix.project }}
+    steps:
+      # Actions are pinned to a commit SHA, not a tag. A tag is a moving pointer:
+      # whoever controls the action's repository can repoint it at new code, and
+      # that lands in this job with no diff to review. The trailing comment is the
+      # human-readable version, and what Dependabot rewrites when it bumps the pin.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Otherwise the token stays on disk for the rest of the job, where any
+          # code that runs later can find it.
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          # Each project has its own lock file, so key the npm cache per project
+          # rather than sharing one cache across the whole matrix. A cache entry is
+          # attacker-influenced data, but `npm ci` checks every tarball against the
+          # integrity hash in the lock file, so a poisoned entry cannot install.
+          cache: npm
+          cache-dependency-path: projects/${{ matrix.project }}/package-lock.json
+
+      # `npm ci` installs exactly what the lock file pins and fails if package.json
+      # has drifted from it; `npm install` would resolve something newer and rewrite
+      # the lock file in place. --ignore-scripts is the half that matters most:
+      # without it, every install and postinstall hook in the dependency tree runs
+      # arbitrary code before a single line of this repository executes. Neither
+      # project needs those hooks — if a future dependency does, that is worth
+      # finding out here rather than discovering it silently.
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  # The distributable form of the MCP server: an `.mcpb` bundle, built and started here on every
+  # change rather than only when a release is tagged. Bundling is the step with its own ways to
+  # fail — esbuild flattens the import graph, and anything that resolved at run time in the source
+  # tree stops resolving in a single file — so finding out at tag time is finding out too late.
+  bundle:
+    name: mcp-server bundle
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: projects/mcp-server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: projects/mcp-server/package-lock.json
+
+      - run: npm ci --ignore-scripts
+      - run: npm run build:mcpb
+      - run: npm run verify:mcpb

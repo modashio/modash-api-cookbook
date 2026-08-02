@@ -1,0 +1,14 @@
+{
+  "name": "modash-api-mcp",
+  "displayName": "Modash",
+  "version": "1.0.0",
+  "description": "Creator search, profile reports with audience demographics, and brand collaboration history from the Modash API. Meters credit spend per call and enforces a per-session budget. Runs against synthetic fixtures with no token.",
+  "author": {
+    "name": "Modash",
+    "url": "https://www.modash.io"
+  },
+  "homepage": "https://github.com/modashio/modash-api-cookbook/tree/main/projects/mcp-server",
+  "repository": "https://github.com/modashio/modash-api-cookbook",
+  "license": "MIT",
+  "keywords": ["modash", "influencer-marketing", "creator-discovery", "instagram", "tiktok", "youtube"]
+}

@@ -1,0 +1,203 @@
+name: Release MCP bundle
+
+# Publishes the MCP server as an installable `.mcpb` on a GitHub release, which is how a reader who
+# does not want to clone anything gets it: download one file, double-click, done.
+#
+# **Releasing is merging.** The version in `plugin/mcpb/manifest.json` is the switch: land a pull
+# request that raises it and the merge commit is tagged and published automatically. Every other
+# push to `main` finds that version already released and stops before building anything, so this
+# costs a few seconds on an ordinary merge and nothing else.
+#
+# That leaves one thing to get right, and `npm run build:mcpb` fails the release if it is wrong:
+# the version has to be bumped in all three manifests at once — `package.json`,
+# `.claude-plugin/plugin.json` and `plugin/mcpb/manifest.json`.
+#
+# Pushing a `mcp-server-v*` tag does the same thing for a commit that is not the tip of `main`.
+# Nothing else publishes: running this from the Actions tab, or on a branch, builds and verifies the
+# bundle and attaches it to the run, which is how to look at an artefact before releasing it. If a
+# release run fails on something transient, re-run it from the Actions tab — a re-run keeps the
+# event that started it, so it still publishes.
+#
+# Tags are project-scoped because the repository holds several projects and they version
+# independently.
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'mcp-server-v*'
+  workflow_dispatch:
+
+# No pull request can trigger this workflow, so unlike `ci.yml` it is running reviewed code and is
+# allowed the write access a release needs. It still takes no secrets: building and verifying the
+# bundle must never need a Modash token, and must never spend a credit.
+permissions:
+  contents: read
+
+jobs:
+  # Everything the release is named after comes from the bundle manifest rather than being written
+  # out here, so renaming the plugin or bumping the version cannot leave this workflow reaching for
+  # a file the build does not write.
+  decide:
+    name: Decide whether to publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      tag: ${{ steps.decide.outputs.tag }}
+      bundle: ${{ steps.decide.outputs.bundle }}
+      build: ${{ steps.decide.outputs.build }}
+      publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          manifest=projects/mcp-server/plugin/mcpb/manifest.json
+          version="$(node -p "require('./${manifest}').version")"
+          name="$(node -p "require('./${manifest}').name")"
+          tag="mcp-server-v${version}"
+
+          # The default is a dry run: build it, do not publish it.
+          build=true
+          publish=false
+
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            # A tag that disagrees with the manifest would publish a bundle whose version is not
+            # the one the tag promises, and the mismatch is invisible once it is on a download page.
+            if [ "${GITHUB_REF_NAME}" != "${tag}" ]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} does not match manifest version ${version}." \
+                   "Bump the version in all three manifests, or retag." >&2
+              exit 1
+            fi
+            publish=true
+          elif [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF}" = refs/heads/main ]; then
+            # The version is the switch. An existing release means this push carried something
+            # other than a version bump, which is most of them, and there is nothing to do: CI has
+            # already built this bundle on this commit.
+            if gh release view "${tag}" > /dev/null 2>&1; then
+              echo "::notice::${tag} is already released. Raise the version to publish a new one."
+              build=false
+            else
+              publish=true
+            fi
+          fi
+
+          {
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "bundle=${name}-${version}.mcpb"
+            echo "build=${build}"
+            echo "publish=${publish}"
+          } >> "$GITHUB_OUTPUT"
+
+  bundle:
+    name: Build and publish the bundle
+    needs: decide
+    if: needs.decide.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Creating the release and uploading the bundle to it. `${{ github.token }}` is the only
+      # credential in the job, and it is passed to `gh` as an environment variable rather than
+      # left on disk by the checkout.
+      contents: write
+    defaults:
+      run:
+        working-directory: projects/mcp-server
+    env:
+      VERSION: ${{ needs.decide.outputs.version }}
+      TAG: ${{ needs.decide.outputs.tag }}
+      BUNDLE: ${{ needs.decide.outputs.bundle }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: projects/mcp-server/package-lock.json
+
+      # Same install as CI: the lock file decides, and no dependency's install hook runs. What
+      # ships to users should be built the way it was tested.
+      - run: npm ci --ignore-scripts
+
+      # A release that fails its own tests is worse than no release at all.
+      - run: npm run typecheck
+      - run: npm test
+
+      - run: npm run build:mcpb
+
+      # Unpacks the bundle, starts it the way Claude Desktop would, and talks MCP to it. The
+      # failure this catches — a bundle that unpacks but cannot start — is invisible to a schema
+      # check, and would otherwise be found by whoever downloaded it.
+      - run: npm run verify:mcpb
+
+      - name: Checksum the bundle
+        working-directory: projects/mcp-server/build
+        run: sha256sum "$BUNDLE" > "$BUNDLE.sha256"
+
+      # The dry run: the same bundle, downloadable from the workflow run, with nothing published.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: needs.decide.outputs.publish != 'true'
+        with:
+          name: ${{ needs.decide.outputs.bundle }}
+          path: projects/mcp-server/build/${{ needs.decide.outputs.bundle }}
+          if-no-files-found: error
+
+      - name: Publish the release
+        if: needs.decide.outputs.publish == 'true'
+        working-directory: projects/mcp-server/build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # `--target` creates the tag when there is not one yet, which is the case for a release
+          # triggered by a version bump landing on main.
+          gh release create "$TAG" "$BUNDLE" "$BUNDLE.sha256" \
+            --target "$GITHUB_SHA" \
+            --title "Modash MCP server ${VERSION}" \
+            --notes "$(cat <<NOTES
+          An [MCP](https://modelcontextprotocol.io) server for the
+          [Modash API](https://docs.modash.io), packaged as a bundle Claude Desktop installs with a
+          double click.
+
+          ## Install
+
+          Download \`${BUNDLE}\` below, then double-click it or drag it into Claude Desktop. It asks
+          for a Modash API token on install and stores it in the OS keychain.
+
+          **Leave the token blank to run against synthetic fixtures.** Every tool answers, nothing
+          leaves your machine, and no credits are spent — which is the point of trying it this way
+          first. Get a token from [marketer.modash.io/developer](https://marketer.modash.io/developer)
+          when you want live data, and read
+          [what it costs to run](https://github.com/${GITHUB_REPOSITORY}/tree/${TAG}/projects/mcp-server#what-it-costs-to-run)
+          before you do: the install dialog's credit budget is a hard ceiling, and it defaults to 5.
+
+          For Claude Code, Cursor, Codex and everything else, see the
+          [project README](https://github.com/${GITHUB_REPOSITORY}/tree/${TAG}/projects/mcp-server#running-it).
+
+          ## Updating
+
+          Bundles do not update themselves — that is a property of the format, not an oversight, and
+          it applies to every \`.mcpb\` installed from a file rather than from Anthropic's directory.
+          To move to this version, install it over the one you have. Every other client has its own
+          answer, and they are collected under
+          [keeping it up to date](https://github.com/${GITHUB_REPOSITORY}/tree/${TAG}/projects/mcp-server#keeping-it-up-to-date).
+
+          ## Verify the download
+
+          \`\`\`
+          shasum -a 256 -c ${BUNDLE}.sha256
+          \`\`\`
+
+          The bundle is built by this workflow from the released commit, and the build is
+          reproducible: \`npm run build:mcpb\` on the same commit produces the same bytes.
+          NOTES
+          )"

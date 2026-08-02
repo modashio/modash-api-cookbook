@@ -1,0 +1,92 @@
+name: Bug in a project
+description: Something in this repo is broken, wrong, or doesn't match what its README says.
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Two quick redirects before you fill this in:
+
+        - **If the Modash API behaved unexpectedly**, check [docs.modash.io](https://docs.modash.io)
+          and [error handling](https://help.modash.io/en/articles/14035652-api-error-handling)
+          first. This tracker is for the code in this repo; the API's own behaviour is documented,
+          and you'll get an answer quicker by reading it than by waiting on us.
+        - **A security vulnerability** goes through
+          [private reporting](https://github.com/modashio/modash-api-cookbook/security/advisories/new),
+          not a public issue. See [`SECURITY.md`](https://github.com/modashio/modash-api-cookbook/blob/main/SECURITY.md).
+
+  - type: dropdown
+    id: project
+    attributes:
+      label: Which project
+      # Keep in sync with projects/*/ and the CI matrix. Adding a project? Update this list —
+      # see AGENTS.md § Adding a new project.
+      options:
+        - agentic-influencer-search
+        - mcp-server
+        - Repo-wide (README, CI, conventions)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        I ran `npm run dev` with no token and opened http://localhost:5173.
+        I expected the mock data badge; the page rendered blank and the server logged …
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands you ran, and the brief or prompt you used if the agent was involved.
+      placeholder: |
+        1. cd projects/agentic-influencer-search
+        2. npm install
+        3. OPENAI_API_KEY=... npm run dev
+        4. Ask: "find me creators for a sleep supplement"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mock mode or a live token?
+      description: Mock mode is the default when `MODASH_API_TOKEN` is empty. It only replaces the Modash token — `agentic-influencer-search` still needs a model provider key on top.
+      options:
+        - Mock mode (no Modash token)
+        - Live token against the real API
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Server logs, browser console, or a stack trace. This is rendered as a code block, so no backticks needed.
+      render: shell
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Node version (`node -v`), OS, and browser if the UI is involved. This repo requires Node.js 22+.
+      placeholder: Node 22.11.0, macOS 15, Chrome 131
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: ground-rules
+    attributes:
+      label: Before you submit
+      options:
+        - label: This report contains **no API tokens or keys**.
+          required: true
+        - label: This report contains **no real Modash API responses or real creator data** — no real names, handles, profile photos, contact emails or audience demographics. (Those are third-party personal data, and this is a public tracker. Reproduce in mock mode, or redact.)
+          required: true
+        - label: I searched the existing issues.
+          required: true

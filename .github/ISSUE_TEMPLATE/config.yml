@@ -1,0 +1,20 @@
+blank_issues_enabled: false
+contact_links:
+  - name: How does this endpoint behave? What does it cost?
+    url: https://docs.modash.io
+    about: The API reference documents every endpoint, its parameters, its response shape and its credit cost. Almost every question about API behaviour is answered here.
+  - name: I'm getting an error from the API
+    url: https://help.modash.io/en/articles/14035652-api-error-handling
+    about: What each error code means and what to do about it. Branch on the code, not the message.
+  - name: Limits, filters and metrics
+    url: https://help.modash.io/en/articles/14035619-api-cheat-sheet-limits-filters-metrics
+    about: The cheat sheet — rate limits, page sizes, what each filter accepts, how the metrics are calculated.
+  - name: Getting started with the API
+    url: https://help.modash.io/en/articles/14035513-api-overview-and-getting-started
+    about: Your first call, where your token lives, and the difference between the Discovery API and the RAW API.
+  - name: Getting API access, credits or a higher rate limit
+    url: https://www.modash.io/influencer-marketing-api?utm_source=github&utm_campaign=api_cookbook
+    about: Tokens are issued per account rather than self-served. Request an intro and bring your use case.
+  - name: Security vulnerability
+    url: https://github.com/modashio/modash-api-cookbook/security/advisories/new
+    about: Report privately, never as a public issue. See SECURITY.md for what goes where.
