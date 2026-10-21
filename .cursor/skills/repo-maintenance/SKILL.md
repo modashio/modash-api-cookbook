@@ -17,15 +17,16 @@ Every step ends when each of its items has a ledger row.
 
 - Run the `guard` job's commands from [`ci.yml`](../../../.github/workflows/ci.yml) at the repo root.
 - In every `projects/*/`, run each `run:` step of every `ci.yml` job that targets it, in order.
-- Follow each project README's no-token path as a newcomer would: start `npm run dev`, hit the URL or endpoint the README names, and stop it. Use a free port if `3000` is taken.
+- Follow each project README's no-token path as a newcomer would: start `npm run dev`, hit the URL or endpoint the README names, then stop it. Dev scripts spawn children, so start with `setsid` and stop with `kill -- -<pgid>`. Set `PORT` in the shell if `3000` is taken.
 - A failure here outranks everything below. Fix it first.
 
 ## 2. Triage digest
 
 Collect with `gh`, report only.
 
-- Failed or cancelled runs on `main` in the last 30 days, with the failing step.
-- Open pull requests: age, CI state, whether they need a rebase. Dependabot PRs first, security ones before version bumps.
+- Failed or cancelled runs on `main` in the last 30 days, with the failing step. No CI run on `main` in that window is a finding too: give the date of the last one.
+- Open pull requests: age, CI state, whether they need a rebase. Dependabot PRs first, security ones before version bumps. A Dependabot PR for an ecosystem `dependabot.yml` does not configure is a security update.
+- When several PRs fail the same way, find the shared cause in the logs and name it once.
 - Open issues with no label, and issues or PRs with no activity in 60 days.
 - The **Which project** answers on recent bug reports, to spot a project that keeps breaking.
 
@@ -33,8 +34,8 @@ Collect with `gh`, report only.
 
 - Run zizmor over `.github/` offline (install: [tools.md](tools.md)). It catches template injection, cache poisoning and Dependabot cooldown gaps that `audit-ci.mjs` does not.
 - For each finding, fix it, or record why it is accepted. Keep fixes inside the rules in `AGENTS.md` under Keep CI unpoisonable.
-- Read the settings `AGENTS.md` says the audit cannot see, with read-only `gh api`: branch protection on `main` and its required checks, fork PR workflow approval, and default workflow token permissions. A `403` means the token cannot read it; record that, not a pass.
-- Every required check name still matches a job name in `ci.yml`. A renamed job leaves a required check that never runs.
+- Read the settings `AGENTS.md` says the audit cannot see, with read-only `gh api` (endpoints: [tools.md](tools.md)): branch protection on `main` and its required checks, fork PR workflow approval, and default workflow token permissions. A `403` means the token cannot read it; try the fallbacks, then record it as unreadable, not as a pass.
+- Every required check name still matches a job name in `ci.yml`. A renamed job leaves a required check that never runs. No required checks at all is a finding.
 
 ## 4. Convention drift
 
@@ -43,27 +44,29 @@ Check every project against each item.
 - The `projects/*` directory list matches the root `README.md` projects table, the **Which project** dropdown in `.github/ISSUE_TEMPLATE/bug_report.yml`, and `.claude-plugin/marketplace.json` for plugin projects. Find any other hardcoded list with `rg --hidden` for each project name.
 - `package.json` has `"type": "module"`, `"engines": { "node": ">=22" }`, and `dev`, `typecheck`, `test`, `build` scripts. `typecheck` is `tsgo --noEmit`, with `@typescript/native-preview` in `devDependencies`.
 - `tsconfig.json` sets `strict: true`.
-- Every env var the source reads (`rg -o 'process\.env\.\w+'` plus any `env[...]` lookups) is in `.env.example`, with a placeholder value.
-- The Node version agrees across `engines`, every `node-version:` in `.github/workflows/`, and the docs.
+- Every env var the source reads is in `.env.example`, with a placeholder or an empty value for secrets. Find them with `rg -o 'process\.env\.\w+'`, and read the keys of any schema that parses `process.env` whole.
+- Every stated Node version agrees: `engines`, `node-version:` in `.github/workflows/`, bundler targets, plugin manifest runtimes, and any doc that names one. A doc that names none is fine.
 
 ## 5. Dependencies
 
 Per project:
 
 - `npm audit` and `npm audit signatures`. A signature failure is a stop-the-sweep finding.
-- `npm outdated`. For each update, check its publish date with `npm view <pkg> time --json`. Hold anything published under 7 days ago, unless it fixes a high or critical advisory.
-- Read the release notes for every minor and major you would take.
-- Apply in-range and minor updates with `npm update --ignore-scripts`. Review the lock file diff: no new registry hosts, no lost integrity hashes, no surprise new packages. Then rerun step 1 for that project.
+- `npm outdated`. It skips prerelease-only packages such as `@typescript/native-preview`; check those with `npm view <pkg> dist-tags`.
+- Hold every version published under 7 days ago, direct or transitive, unless it fixes a high or critical advisory. Check a date with `npm view <pkg> time --json`.
+- Scan the release notes of each direct dependency you would move a minor or more, for removals, breaking changes and new Node requirements.
+- Apply updates with `npm update --ignore-scripts --before=<UTC timestamp 7 days ago>`. Without `--before`, `npm update` takes versions inside the cooldown.
+- Review the lock file diff: no new registry hosts, no lost integrity hashes, no surprise new packages, and a note for each transitive major. Then rerun step 1 for that project.
 - Leave majors in the ledger with what breaks.
-- Find unused and missing dependencies with knip ([tools.md](tools.md)). Remove an unused one only after `rg` confirms nothing imports it, including configs and scripts.
+- Find unused and missing dependencies with knip ([tools.md](tools.md)). Remove an unused one only after `rg` confirms nothing imports it, including configs and scripts. Unused files and exports go in the ledger as report-only.
 - Leave each project's own `version` alone. For `mcp-server`, merging a version bump publishes a release (`AGENTS.md`, Releasing something downloadable).
 
 ## 6. Docs
 
-- Run lychee over every tracked `*.md` ([tools.md](tools.md)): offline first for relative links and anchors, then online. Retry an external failure once before recording it.
+- Run lychee over every tracked `*.md` and `.github/` YAML ([tools.md](tools.md)): offline first for relative links and anchors, then online. Retry an external failure once before recording it. A TLS failure from the sandbox is unverified, not broken.
 - lychee cannot resolve an anchor on a directory link. Check those against the directory's `README.md` by hand.
 - Every `npm run <script>` quoted in a project's docs exists in that project's `package.json`.
-- Credit costs and rate limits quoted in docs match the public [API reference](https://docs.modash.io). Record both values on a mismatch; do not guess.
+- Credit costs, rate limits and billing rules quoted in docs match the public [API reference](https://docs.modash.io) or the help centre at help.modash.io. Record both values on a mismatch, and flag any claim neither source makes.
 - `SECURITY.md`, `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/config.yml` still point at working contacts and pages.
 
 ## 7. Public-repo hygiene
