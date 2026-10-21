@@ -409,7 +409,7 @@ is the one a harness wants; the catalog refresh is a slash command in a session.
 Auto-update exists and is worth enabling, with two caveats. It is **off by default for this
 marketplace** — Claude Code enables it for Anthropic's own marketplaces only — so turn it on under
 `/plugin` → Marketplaces, or set `"autoUpdate": true` on the
-[`extraKnownMarketplaces`](https://code.claude.com/docs/en/settings#extraknownmarketplaces) entry.
+[`extraKnownMarketplaces`](https://code.claude.com/docs/en/settings-reference#extraknownmarketplaces) entry.
 And it lands quietly: Claude Code checks after a session starts, with a delay of up to ten minutes,
 and the running session keeps the version it launched with until `/reload-plugins` or the next
 launch. If a version bump does not appear to take, run the three commands above — there are open
