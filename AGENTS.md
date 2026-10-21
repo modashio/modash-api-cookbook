@@ -106,6 +106,7 @@ someone deleting the audit job in the same pull request that needs it.
 ```
 README.md                    Customer-facing intro: getting API access, credits, first call
 AGENTS.md                    This file
+.cursor/skills/              Agent skills for this repo; run repo-maintenance for a health check
 projects/<project-name>/     One self-contained project per directory
   README.md                  What it does, how to run it, how it maps to the API
   AGENTS.md                  Project-specific notes (only if it adds something)
