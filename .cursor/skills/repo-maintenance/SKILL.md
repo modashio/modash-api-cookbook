@@ -49,6 +49,17 @@ Check every project against each item.
 
 ## 5. Dependencies
 
+### Security alerts
+
+Fix every high and critical alert on the repo's Dependabot alerts page, in every project and in the action pins. The sweep is not done while one is open, unless no patched version exists anywhere.
+
+- Read the alerts with `gh api repos/<owner>/<repo>/dependabot/alerts?state=open`. On `403`, use `npm audit` per project and the action query in [tools.md](tools.md); both read the same GitHub advisory database.
+- Take the patched version even inside the 7-day cooldown, and even when it is a major.
+- When a parent pins the vulnerable range, add an npm `overrides` entry scoped to that parent. Then prove the parent still works on the path the project uses, including a case that must fail.
+- With no patched version, record in the ledger the advisory, where the package sits, whether the vulnerable code runs or ships, and any open upstream fix. A maintainer then dismisses the alert or replaces the parent.
+
+### Updates
+
 Per project:
 
 - `npm audit` and `npm audit signatures`. A signature failure is a stop-the-sweep finding.
@@ -78,7 +89,7 @@ Per project:
 
 ## 8. Fix and report
 
-- Fix mechanical items: lists, links, scripts, `.env.example`, in-range dependency updates, zizmor safe fixes that keep `audit-ci.mjs` green. One Conventional Commit per logical change.
-- Defer with a reason: majors, policy changes (new Dependabot ecosystems, cooldown settings), anything that changes API calls or credit cost, anything needing a version bump, settings changes, suspected secrets.
+- Fix mechanical items: lists, links, scripts, `.env.example`, in-range dependency updates, every high and critical alert, zizmor safe fixes that keep `audit-ci.mjs` green. One Conventional Commit per logical change.
+- Defer with a reason: majors that fix no high or critical alert, policy changes (new Dependabot ecosystems, cooldown settings), anything that changes API calls or credit cost, anything needing a version bump, settings changes, suspected secrets.
 - Rerun step 1 after the last fix. Done when it passes again.
 - Open a draft PR titled `chore: repo maintenance sweep`, using `.github/pull_request_template.md`. Under **What this changes**, put three short lists: fixed, deferred with reason, needs a maintainer decision. Put the triage digest after them.

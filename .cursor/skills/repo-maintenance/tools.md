@@ -40,6 +40,11 @@ Read-only, with `R=modashio/modash-api-cookbook`:
 | Fork PR workflow approval | `gh api repos/$R/actions/permissions/fork-pr-contributor-approval` | none |
 | Default workflow token permissions | `gh api repos/$R/actions/permissions/workflow` | none |
 
+## Advisories
+
+- One advisory, with patched versions per range: `gh api /advisories/<GHSA-id>`.
+- Action pins: `gh api "/advisories?ecosystem=actions&affects=<owner>/<action>"` for each action in `.github/workflows/`, then compare each range with the pin's `# vX.Y.Z` comment.
+
 ## API reference
 
 `https://docs.modash.io/llms.txt` lists every docs page. Each page has a `.md` twin, which is the quickest way to read the cost text.
