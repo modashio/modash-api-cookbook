@@ -267,10 +267,13 @@ released commit, so no binary is ever committed and none is ever built on someon
 
 ### Cutting a release of the MCP bundle
 
-1. **Bump the version in all three manifests in the same commit** —
-   [`package.json`](./projects/mcp-server/package.json),
-   [`.claude-plugin/plugin.json`](./projects/mcp-server/.claude-plugin/plugin.json) and
-   [`plugin/mcpb/manifest.json`](./projects/mcp-server/plugin/mcpb/manifest.json). `npm test` fails
+1. **Bump the version in all four places in the same commit** —
+   [`package.json`](./projects/mcp-server/package.json) (with `npm version patch --no-git-tag-version`,
+   so the lock file follows),
+   [`.claude-plugin/plugin.json`](./projects/mcp-server/.claude-plugin/plugin.json),
+   [`plugin/mcpb/manifest.json`](./projects/mcp-server/plugin/mcpb/manifest.json) and `SERVER_INFO`
+   in [`src/mcp/server.ts`](./projects/mcp-server/src/mcp/server.ts), which is the
+   `serverInfo.version` clients see. `npm test` fails
    when they disagree, and so does the release build, so a half-done bump blocks the release rather
    than publishing a bundle that lies about its version.
 2. **Check it locally**, from `projects/mcp-server`, with no env vars set:

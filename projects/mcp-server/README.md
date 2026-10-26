@@ -229,7 +229,7 @@ Each release also carries a `.sha256`, and the build is reproducible — the sam
 the same bytes — so a bundle you build yourself should match the one you downloaded:
 
 ```bash
-npm run build:mcpb                       # writes build/modash-api-mcp-1.0.0.mcpb
+npm run build:mcpb                       # writes build/modash-api-mcp-1.0.1.mcpb
 npm run verify:mcpb                      # unpacks it, starts it, and calls a free tool
 shasum -a 256 build/*.mcpb
 ```
@@ -245,9 +245,9 @@ Releasing is merging. The version in [`plugin/mcpb/manifest.json`](./plugin/mcpb
 the switch: land a pull request that raises it and
 [`.github/workflows/release-mcpb.yml`](../../.github/workflows/release-mcpb.yml) tags the merge
 commit, builds the bundle, verifies it, and publishes the release. Every other push to `main` finds
-that version already released and stops. Bump the version in all three manifests at once —
-`package.json`, `.claude-plugin/plugin.json` and the bundle manifest — or the build fails before
-anything is published.
+that version already released and stops. Bump the version in all four places at once —
+`package.json`, `.claude-plugin/plugin.json`, the bundle manifest and `SERVER_INFO` in
+`src/mcp/server.ts` — or the build fails before anything is published.
 
 Pushing a `mcp-server-v*` tag releases a commit that is not the tip of `main`. Nothing else
 publishes: running the workflow from the Actions tab, or pushing a branch, builds and verifies the
