@@ -9,6 +9,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # A compromised release is usually caught and pulled within days. Waiting a week
+    # keeps it out of a pin, and matches the cooldown in the repo-maintenance skill.
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns: ["*"]
