@@ -51,7 +51,7 @@
     "credit_budget": {
       "type": "number",
       "title": "Credit budget per session",
-      "description": "Hard ceiling on Modash credits this server may spend before it starts refusing paid calls. A full profile report costs 1 credit; a search costs 0.15. Set 200 to run the brand crossover analysis, which prices itself before it runs and refuses anything above what is left.",
+      "description": "Hard ceiling on Modash credits this server may spend before it starts refusing paid calls. A full profile report costs 1 credit; a search costs 0.15. Set 200 to run the brand crossover analysis, which prices itself before it runs, asks you to confirm any single run above 20 credits, and refuses anything above what is left of this budget even when confirmed.",
       "default": 5,
       "min": 0.15,
       "required": false
@@ -123,7 +123,7 @@
     },
     {
       "name": "modash_brand_crossover",
-      "description": "Do creators who post about one brand also post about its rival? Compared with an unrelated pair. 0.2 credits per page of posts; refuses up front if it could exceed the budget."
+      "description": "Do creators who post about one brand also post about its rival? Compared with an unrelated pair. 0.2 credits per page of posts, plus lookups; asks you to confirm any single run above 20 credits, and always refuses above the session budget."
     },
     {
       "name": "modash_find_creators_by_email",

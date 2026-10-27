@@ -45,6 +45,10 @@ const AI_PAGE_SIZE = 50;
 const AI_MAX_DEPTH = 1_500;
 /** Below this many creators in both lists, a difference between two shares is mostly noise. */
 export const SMALL_COUNT = 30;
+/** The last ~3 months, so a default run finishes before a client's tool-call timeout. */
+export const DEFAULT_WINDOW_DAYS = 91;
+/** Above this many credits, a single run needs the caller to confirm the spend first. */
+export const CONFIRM_THRESHOLD_CREDITS = 20;
 
 /** AI Search snaps `followersCount.min` down to the nearest of these, per the API reference. */
 const FOLLOWER_RUNGS = [
@@ -180,9 +184,9 @@ export function cheaperOptions(
     const pages = Math.max(1, Math.floor(options.maxPagesPerWeek / 2));
     add(`maxPagesPerWeek: ${pages}`, { ...options, maxPagesPerWeek: pages }, brands, weeks);
   }
-  if (weeks >= weeksInWindow && options.windowDays > 90) {
-    const shorter = buildWindow(90).weeks.length;
-    add('windowDays: 90', options, brands, Math.min(weeks, shorter));
+  if (weeks >= weeksInWindow && options.windowDays > DEFAULT_WINDOW_DAYS) {
+    const shorter = buildWindow(DEFAULT_WINDOW_DAYS).weeks.length;
+    add(`windowDays: ${DEFAULT_WINDOW_DAYS}`, options, brands, Math.min(weeks, shorter));
   }
   if (hasCreatorFilter(options)) {
     add(

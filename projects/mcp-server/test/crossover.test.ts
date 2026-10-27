@@ -8,8 +8,10 @@ import {
   buildWindow,
   ceilingFor,
   cheaperOptions,
+  CONFIRM_THRESHOLD_CREDITS,
   type CrossoverOptions,
   comparePair,
+  DEFAULT_WINDOW_DAYS,
   pickWeeks,
   readComparison,
   sample,
@@ -85,7 +87,7 @@ describe('the cost ceiling', () => {
     const fit = options.find((option) => option.change.startsWith('sampleWeeks: 4 '));
     assert.ok(fit, JSON.stringify(options));
     assert.ok(fit.ceilingCredits <= 10);
-    assert.ok(options.some((option) => option.change === 'windowDays: 90'));
+    assert.ok(options.some((option) => option.change === `windowDays: ${DEFAULT_WINDOW_DAYS}`));
   });
 });
 
@@ -209,8 +211,11 @@ describe('planning is free and honest about the budget', () => {
       ['Northpath Outdoors/domain', 'Summitline Athletic/domain', 'Tidewater Coffee/name', 'Pixelforge Games/domain'],
     );
     assert.equal(data?.['brands'][0].alternatives[0].name, 'Northpath Kids');
-    assert.deepEqual(data?.['sampling'], { weeksInWindow: 53, weeksPulled: 6, maxPagesPerWeek: 3, fullPull: false });
+    // The default 91-day window (the last ~3 months) is 13 complete weeks.
+    assert.deepEqual(data?.['sampling'], { weeksInWindow: 13, weeksPulled: 6, maxPagesPerWeek: 3, fullPull: false });
     assert.equal(data?.['ceiling'].totalCredits, 14.4);
+    assert.equal(data?.['needsConfirmation'], false);
+    assert.equal(data?.['confirmThresholdCredits'], 20);
   });
 
   it('says the default 5-credit budget does not fit, and how to change it', async () => {
@@ -229,7 +234,17 @@ describe('planning is free and honest about the budget', () => {
     assert.match(result.text, /Budget stop: this analysis could cost up to 14.4 credits/);
     assert.match(result.text, /No paid call was made/);
     assert.match(result.text, /sampleWeeks: 2 /);
-    assert.doesNotMatch(result.text, /sampleWeeks: 53/);
+    assert.doesNotMatch(result.text, /sampleWeeks: 13/);
+    assert.equal(await spent(client), 0);
+  });
+
+  it('refuses even when confirmed, since confirming cannot raise the session budget', async () => {
+    const { client } = await session;
+    // The ceiling (14.4) is confirmed but still above the 5-credit session budget.
+    const result = await call(client, 'modash_brand_crossover', { ...question, confirmCredits: 14.4 });
+    assert.equal(result.isError, true);
+    assert.match(result.text, /Budget stop: this analysis could cost up to 14.4 credits/);
+    assert.doesNotMatch(result.text, /Confirm before running/);
     assert.equal(await spent(client), 0);
   });
 
@@ -260,9 +275,11 @@ describe('a run on a 200-credit budget', () => {
     const { client } = await session;
     const { isError, data, text } = await call(client, 'modash_brand_crossover', {
       ...question,
-      sampleWeeks: 3,
+      sampleWeeks: 4,
       location: 'United States',
       minFollowers: 12_000,
+      // The ceiling (24.6) is above the 20-credit confirmation limit, so this run must confirm it.
+      confirmCredits: 24.6,
     });
     assert.equal(isError, false, text);
 
@@ -273,7 +290,7 @@ describe('a run on a 200-credit budget', () => {
     // The fixtures overlap the outdoor brands less than the unrelated pair.
     assert.ok(rival.crossoverShare < baseline.crossoverShare);
     assert.ok(data?.['brandPulls'].some((brand: { otherPlatformPostsSkipped: number }) => brand.otherPlatformPostsSkipped > 0));
-    assert.ok(data?.['caveats'].some((caveat: string) => /Only 3 of 53 weeks/.test(caveat)));
+    assert.ok(data?.['caveats'].some((caveat: string) => /Only 4 of 13 weeks/.test(caveat)));
 
     assert.deepEqual(data?.['creatorFilter'], { locationId: 1001, locationTitle: 'United States', minFollowers: 10_000 });
     const filtered = data?.['filtered'].rival;
@@ -288,6 +305,39 @@ describe('a run on a 200-credit budget', () => {
     assert.ok(cost.creditsThisCall > 0);
     assert.ok(cost.creditsThisCall <= data?.['ceiling'].totalCredits);
     assert.equal(await spent(client), cost.creditsThisCall);
+  });
+
+  it('runs without confirmation when the ceiling is at or under the 20-credit limit', async () => {
+    const { client } = await session;
+    // 2 brands (no baseline) x 1 week x 1 page x 0.2 = 0.4 credits.
+    const { isError, data, text } = await call(client, 'modash_brand_crossover', {
+      ...question,
+      baseline: undefined,
+      sampleWeeks: 1,
+      maxPagesPerWeek: 1,
+    });
+    assert.equal(isError, false, text);
+    assert.equal(data?.['ceiling'].totalCredits, 0.4);
+    assert.ok(data?.['cost'].creditsThisCall <= CONFIRM_THRESHOLD_CREDITS);
+  });
+
+  it('asks for confirmation, and spends nothing, once the ceiling passes the 20-credit limit', async () => {
+    const { client } = await session;
+    const before = await spent(client);
+    const result = await call(client, 'modash_brand_crossover', {
+      ...question,
+      sampleWeeks: 3,
+      location: 'United States',
+      minFollowers: 12_000,
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.text, /Confirm before running: this analysis could cost up to 22.2 credits/);
+    assert.match(result.text, /No paid call was made/);
+    assert.match(result.text, /confirmCredits/);
+    assert.match(result.text, /ask the user to confirm/i);
+    assert.doesNotMatch(result.text, /Budget stop/);
+    // The confirmation message costs nothing: the session total is unchanged.
+    assert.equal(await spent(client), before);
   });
 
   it('says when the page cap cut a week short', async () => {

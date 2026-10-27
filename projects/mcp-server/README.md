@@ -71,7 +71,7 @@ prices are in the [API reference](https://docs.modash.io):
 | `modash_summarise_collaborations` | **0.2** | |
 | `modash_find_creators_by_email` | **0.02 per match** | Balance must cover every address submitted |
 | `modash_plan_brand_crossover` | 0 | Resolves brands and prices a crossover run before it starts |
-| `modash_brand_crossover` | **0.2 per page + 0.025 per lookup** | Many calls in one. Refuses if its ceiling does not fit. [See below](#brand-crossover-do-creators-pick-a-side) |
+| `modash_brand_crossover` | **0.2 per page + 0.025 per lookup** | Many calls in one. Asks to confirm above 20 credits, refuses above the session budget. [See below](#brand-crossover-do-creators-pick-a-side) |
 
 The six optional RAW tools do not appear here because they do not spend credits at all — they
 spend RAW requests, one per call, from a different allowance. See
@@ -190,8 +190,7 @@ and it calls `modash_plan_brand_crossover` (free), shows you the price, then cal
 ### What it costs
 
 Nothing tells you a brand's post volume for free, so the tool cannot forecast the cost. It works
-out a **ceiling** instead, from the documented prices, and refuses to start if the ceiling is above
-what is left of the session budget:
+out a **ceiling** instead, from the documented prices:
 
 - posts: brands × weeks pulled × `maxPagesPerWeek` × 0.2
 - lookups (only with `location` or `minFollowers`): pairs × ⌈(`maxCrossoverLookups` +
@@ -203,24 +202,42 @@ Real runs cost less: quiet brands stop before the page cap and empty weeks are f
 | --- | --- |
 | Defaults: rivals plus baseline, 6 sampled weeks, 3 pages a week | 14.4 |
 | The same, restricted to one country and 10k+ followers | 29.4 |
+| Every week of the default 91-day window (13), 3 pages a week, four brands | 31.2 |
 | Every week of a year (53), 3 pages a week, four brands | 127.2 |
 | Every week of a year, 10 pages a week, four brands | 424 |
 
-**Set `MODASH_CREDIT_BUDGET=200` for this analysis.** The default of 5 is sized for single calls,
-and even the default crossover run needs more. In Claude Desktop it is the extension setting
-**Credit budget per session**; change it, then restart the extension. When a run does not fit,
-both tools list cheaper settings, each priced the same way: the most weeks that fit, fewer pages a
-week, a 90-day window, or dropping the creator filter.
+**Two ceilings apply, and either one can stop a run before it spends anything:**
+
+1. **The session budget (`MODASH_CREDIT_BUDGET`) is absolute.** A run refuses outright, no matter
+   what the caller sends, if its ceiling is above what is left of the budget. **Set it to 200 to
+   run this analysis**; the default of 5 is sized for single calls. In Claude Desktop that is the
+   extension setting **Credit budget per session** — change it, then restart the extension.
+2. **A per-run limit of 20 credits needs explicit confirmation.** Above that, `modash_brand_crossover`
+   does not spend anything: it returns the ceiling, the cheaper settings, and asks for the spend
+   to be confirmed by setting `confirmCredits` to at least the ceiling on the next call. This is
+   there so a model cannot quietly spend fifty credits because the user asked an open-ended
+   question — it is expected to show the estimate and wait for the user to say yes, not to set
+   `confirmCredits` on its own. Confirming still cannot get around the session budget in (1).
+
+When a run does not fit either ceiling, both tools list cheaper settings, each priced the same
+way: the most weeks that fit, fewer pages a week, a shorter window, or dropping the creator
+filter.
+
+**The default window is the last 91 days (13 complete weeks),** not a full year. That keeps the
+default run's ceiling under the 20-credit confirmation limit and keeps it fast enough to finish
+before most MCP clients give up on a tool call, typically after about 60 seconds. A longer
+`windowDays` is still allowed — a full year is 53 weeks — it just costs more and, like anything
+else over 20 credits, needs the same confirmation step.
 
 **Sampling.** `sampleWeeks` spreads the pulled weeks evenly over the window, so a sample covers
 every season. It is the main lever on cost, and it has a known bias: a creator who posted about
 the two brands in different weeks is missed, so absolute shares come out low. The rival and
 baseline pairs are sampled the same way, which is why the comparison holds up better than either
-number. `sampleWeeks: 53` over 365 days pulls every week.
+number. Setting `sampleWeeks` to the full week count of the window pulls every week.
 
 **Time.** Collaboration pages run at two a second and AI Search at one a second, all serially.
-The plan reports the worst case. Some MCP clients stop waiting after 60 seconds, which is another
-reason the defaults are small.
+The plan reports the worst case. Some MCP clients stop waiting after 60 seconds, which is the
+main reason the defaults are small — a confirmed, fuller run can still take a minute or more.
 
 ### What is left out, and why
 

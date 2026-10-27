@@ -2,9 +2,11 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod';
 
 import {
+  CONFIRM_THRESHOLD_CREDITS,
   type CrossoverOptions,
   type CrossoverPlan,
   cheaperOptions,
+  DEFAULT_WINDOW_DAYS,
   planCrossover,
   runCrossover,
 } from '../../analysis/brand-crossover.js';
@@ -18,6 +20,13 @@ import { guard, priced, problem, respond, withCost } from '../result.js';
  * Two tools rather than one, because the expensive part is unknowable until it has run. The plan
  * is free and says what the run could cost at most; the run checks the same ceiling against the
  * budget and refuses before sending anything when it does not fit.
+ *
+ * A run is never silently expensive. Below CONFIRM_THRESHOLD_CREDITS it just runs. Above it, the
+ * run refuses and asks for `confirmCredits` instead of spending — it is one more thing for a model
+ * to get wrong on its own, so the model is expected to show the user the estimate and only pass
+ * `confirmCredits` back once they say yes. Either way, nothing a caller sends can push a run past
+ * the remaining session budget (`MODASH_CREDIT_BUDGET`); that check happens first and ignores
+ * `confirmCredits` entirely.
  */
 
 const brandInput = z
@@ -38,7 +47,18 @@ const inputShape = {
         'say which.',
     ),
   platform: platformSchema.default('instagram'),
-  windowDays: z.number().int().min(7).max(365).default(365).describe('How far back from endDate to look'),
+  windowDays: z
+    .number()
+    .int()
+    .min(7)
+    .max(365)
+    .default(DEFAULT_WINDOW_DAYS)
+    .describe(
+      `How far back from endDate to look. Defaults to ${DEFAULT_WINDOW_DAYS} days (the last ~3 ` +
+        "months), so a default run finishes before a client's tool-call timeout, typically 60 " +
+        'seconds. A longer window costs more and, like anything else over the confirmation ' +
+        'limit, needs confirmCredits.',
+    ),
   endDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -87,6 +107,18 @@ const inputShape = {
     .default(150)
     .describe('Creators sampled from the rest of the base per pair, to estimate the filtered base'),
   seed: z.number().int().default(1).describe('Seed for the samples, so a run can be repeated'),
+  confirmCredits: z
+    .number()
+    .min(0)
+    .optional()
+    .describe(
+      `Confirms a spend above the ${CONFIRM_THRESHOLD_CREDITS}-credit default limit for a single ` +
+        'run. Leave unset the first time. Set it only after telling the user the estimated cost ' +
+        '(the ceiling below, or from modash_plan_brand_crossover) and getting their explicit ' +
+        'go-ahead — never set it on your own initiative or because a previous call asked for it. ' +
+        'Set it to at least the ceiling credits named in that ask. A run still refuses, confirmed ' +
+        'or not, if the ceiling is above what is left of the session budget.',
+    ),
 };
 
 const resolvedBrandSchema = z.object({
@@ -154,6 +186,14 @@ const BUDGET_HINT =
   'analysis). In Claude Desktop that is the extension setting "Credit budget per session"; the ' +
   'server picks it up after the extension restarts.';
 
+const CONFIRM_HINT =
+  'Ask the user to confirm this spend before calling again — do not decide on their behalf. If ' +
+  'they agree, call modash_brand_crossover again with confirmCredits set to at least the ceiling ' +
+  'above, and the same other arguments.';
+
+/** `confirmCredits` is a tool-layer gate; the analysis functions never see it. */
+type CrossoverArgs = CrossoverOptions & { confirmCredits?: number | undefined };
+
 const planPayload = (plan: CrossoverPlan) => ({
   platform: plan.platform,
   window: plan.window,
@@ -204,21 +244,26 @@ export function registerCrossoverTools(server: McpServer, ctx: ToolContext): voi
         ...planShape,
         budget: z.object({ budget: z.number(), spent: z.number(), remaining: z.number() }),
         fits: z.boolean(),
+        confirmThresholdCredits: z.number(),
+        needsConfirmation: z.boolean(),
         cheaperOptions: z.array(z.object({ change: z.string(), ceilingCredits: z.number() })),
         notes: z.array(z.string()),
       }),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     },
     guard(async (args) => {
-      const options = args as CrossoverOptions;
+      const { confirmCredits: _ignored, ...options } = args as CrossoverArgs;
       const plan = await planCrossover(ctx.client, options);
       const remaining = ctx.ledger.remaining;
       const fits = plan.ceiling.totalCredits <= remaining;
+      const needsConfirmation = plan.ceiling.totalCredits > CONFIRM_THRESHOLD_CREDITS;
 
       return respond({
         ...planPayload(plan),
         budget: { budget: ctx.ledger.budget, spent: ctx.ledger.spent, remaining },
         fits,
+        confirmThresholdCredits: CONFIRM_THRESHOLD_CREDITS,
+        needsConfirmation,
         cheaperOptions: cheaperOptions(options, plan.sampling.weeksInWindow, remaining),
         notes: [
           'The ceiling assumes every sampled week fills maxPagesPerWeek pages. Smaller brands ' +
@@ -229,6 +274,13 @@ export function registerCrossoverTools(server: McpServer, ctx: ToolContext): voi
             ? ['Some inputs matched several brand identities. Check the names; pass a brandId to pick another.']
             : []),
           ...(fits ? [] : [BUDGET_HINT]),
+          ...(needsConfirmation && fits
+            ? [
+                `This is above the default ${CONFIRM_THRESHOLD_CREDITS}-credit confirmation limit. ` +
+                  'modash_brand_crossover will refuse and ask for confirmCredits rather than run it ' +
+                  'automatically — show this estimate to the user and ask before confirming.',
+              ]
+            : []),
         ],
       });
     }),
@@ -245,10 +297,14 @@ export function registerCrossoverTools(server: McpServer, ctx: ToolContext): voi
         '(the base), and runs two unrelated brands the same way as a baseline. Optionally ' +
         'restricts the answer to creators in a location and/or above a follower count. Costs ' +
         'credits: 0.2 per page of 30 posts per brand-week, plus 0.025 per creator returned by ' +
-        'the optional lookup. Before sending anything it works out the most the run could cost ' +
-        'and refuses if that exceeds the remaining session budget. The defaults are a cheap ' +
-        'sample (6 weeks, 3 pages a week); call modash_plan_brand_crossover first to see the ' +
-        'cost and cheaper or fuller settings. A run can take a minute or more.',
+        'the optional lookup. Before sending anything it works out the most the run could cost. ' +
+        `Above ${CONFIRM_THRESHOLD_CREDITS} credits it refuses and asks for confirmCredits instead ` +
+        'of running — show the user the estimate and get their explicit go-ahead before setting ' +
+        'that argument yourself; do not confirm on the user\'s behalf. It also refuses outright, ' +
+        'confirmed or not, if the estimate is above the remaining session budget. The defaults ' +
+        `are a cheap sample over the last ${DEFAULT_WINDOW_DAYS} days (6 weeks, 3 pages a week); ` +
+        'call modash_plan_brand_crossover first to see the cost and cheaper or fuller settings. ' +
+        'A run can take a minute or more.',
       inputSchema: z.object(inputShape),
       outputSchema: withCost({
         ...planShape,
@@ -278,22 +334,41 @@ export function registerCrossoverTools(server: McpServer, ctx: ToolContext): voi
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     },
     guard(async (args) => {
-      const options = args as CrossoverOptions;
+      const { confirmCredits, ...options } = args as CrossoverArgs;
       const plan = await planCrossover(ctx.client, options);
       const remaining = ctx.ledger.remaining;
+      const ceiling = plan.ceiling.totalCredits;
 
-      if (plan.ceiling.totalCredits > remaining) {
+      // The session budget is a hard ceiling. Nothing a caller sends, confirmed or not, moves it.
+      if (ceiling > remaining) {
         const suggestions = cheaperOptions(options, plan.sampling.weeksInWindow, remaining)
           .filter((option) => option.ceilingCredits <= remaining)
           .map((option) => `  - ${option.change}: at most ${option.ceilingCredits} credits`)
           .join('\n');
         return problem(
-          `Budget stop: this analysis could cost up to ${plan.ceiling.totalCredits} credits ` +
+          `Budget stop: this analysis could cost up to ${ceiling} credits ` +
             `(${plan.ceiling.postsCredits} for posts, ${plan.ceiling.lookupCredits} for lookups), ` +
             `but only ${remaining} of the ${ctx.ledger.budget}-credit session budget is left. ` +
             `No paid call was made.\n\n` +
             (suggestions ? `Settings that fit:\n${suggestions}` : 'No cheaper setting fits what is left.') +
             `\n\n${BUDGET_HINT}`,
+        );
+      }
+
+      // A run that fits the budget but is still expensive needs a human's explicit go-ahead.
+      if (ceiling > CONFIRM_THRESHOLD_CREDITS && (confirmCredits === undefined || confirmCredits < ceiling)) {
+        const suggestions = cheaperOptions(options, plan.sampling.weeksInWindow, remaining)
+          .filter((option) => option.ceilingCredits <= remaining)
+          .map((option) => `  - ${option.change}: at most ${option.ceilingCredits} credits`)
+          .join('\n');
+        return problem(
+          `Confirm before running: this analysis could cost up to ${ceiling} credits ` +
+            `(${plan.ceiling.postsCredits} for posts, ${plan.ceiling.lookupCredits} for lookups), ` +
+            `above the default ${CONFIRM_THRESHOLD_CREDITS}-credit limit for a single run. No ` +
+            `paid call was made.\n\n${CONFIRM_HINT}\n\n` +
+            (suggestions
+              ? `Cheaper settings, if the user would rather not spend that much:\n${suggestions}`
+              : ''),
         );
       }
 
