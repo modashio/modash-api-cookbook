@@ -56,7 +56,7 @@ describe('RAW tools are opt-in', () => {
     const session = await connect({ ...rawConfig, raw: false });
     const { tools } = await session.client.listTools();
     assert.equal(tools.filter((tool) => tool.name.startsWith('modash_raw_')).length, 0);
-    assert.equal(tools.length, 12);
+    assert.equal(tools.length, 14);
     await session.close();
   });
 
@@ -74,7 +74,7 @@ describe('RAW tools are opt-in', () => {
         'modash_raw_search',
       ],
     );
-    assert.equal(tools.length, 18);
+    assert.equal(tools.length, 20);
     await session.close();
   });
 });

@@ -20,7 +20,7 @@ UI and read the code before you talk to anyone.
 | Project | What it shows | Stack |
 | --- | --- | --- |
 | [`projects/agentic-influencer-search`](./projects/agentic-influencer-search) | An agent that turns a vague brief ("we're launching a magnesium sleep supplement, find me creators") into structured [AI Search](https://www.modash.io/influencer-marketing-api/ai-search) queries, critiques its own results, and builds a shortlist | Node.js + tsx, TypeScript, Express, Vercel AI SDK, React, Tailwind CSS, TanStack Query |
-| [`projects/mcp-server`](./projects/mcp-server) | An [MCP](https://modelcontextprotocol.io) server that hands creator search, profile reports and collaboration history to Claude, Cursor, Codex or any other MCP client — metering credit spend per call and refusing anything that would breach a session budget. Optional [RAW API](https://www.modash.io/influencer-marketing-api/raw) tools for live platform data | Node.js + tsx, TypeScript, MCP TypeScript SDK, Zod, Express |
+| [`projects/mcp-server`](./projects/mcp-server) | An [MCP](https://modelcontextprotocol.io) server that hands creator search, profile reports and collaboration history to Claude, Cursor, Codex or any other MCP client — metering credit spend per call and refusing anything that would breach a session budget. Includes a priced, end-to-end brand crossover analysis: do creators who post about one brand also post about its rival? Optional [RAW API](https://www.modash.io/influencer-marketing-api/raw) tools for live platform data | Node.js + tsx, TypeScript, MCP TypeScript SDK, Zod, Express |
 
 Every project runs standalone: `cd` into it, install, add a token, run. There is no monorepo
 tooling, no shared build step, and nothing to bootstrap at the root.

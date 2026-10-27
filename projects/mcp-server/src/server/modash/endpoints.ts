@@ -86,17 +86,86 @@ export const getDictionary = (
     detail: `${platform} ${kind}`,
   });
 
-/** `GET /ai/brands` — 0 credits. Names for AI Search filters; unrelated to the numeric brand ids. */
+/**
+ * `GET /ai/brands` — 0 credits. Names for AI Search filters; unrelated to the numeric brand ids.
+ *
+ * Each result also carries a `brandId`, the brand identity hash. `/collaborations/posts` accepts
+ * that hash as its `id` and then returns posts about every account the brand owns, which is what
+ * the brand crossover analysis is built on. `domain` and `brandId` are exact matches; `query` is
+ * fuzzy.
+ */
 export const getAiBrands = (
   client: ModashClient,
-  { query, platform }: { query?: string; platform?: Platform },
+  {
+    query,
+    domain,
+    brandId,
+    platform,
+  }: { query?: string; domain?: string; brandId?: string; platform?: Platform },
+  tool = 'modash_lookup_ai_dictionary',
 ) =>
   client.call({
-    request: { method: 'GET', path: '/ai/brands', query: { query, platform } },
+    request: { method: 'GET', path: '/ai/brands', query: { query, domain, brandId, platform } },
     schema: schemas.aiBrandsSchema,
     cost: 0,
-    tool: 'modash_lookup_ai_dictionary',
-    detail: 'ai brands',
+    tool,
+    detail: `ai brands ${domain ?? brandId ?? query ?? ''}`.trim(),
+  });
+
+/** `GET /ai/locations` — 0 credits. Location ids for AI Search filters only. */
+export const getAiLocations = (
+  client: ModashClient,
+  { query, platform, limit }: { query: string; platform?: Platform; limit?: number },
+  tool: string,
+) =>
+  client.call({
+    request: { method: 'GET', path: '/ai/locations', query: { query, platform, limit } },
+    schema: schemas.aiLocationsSchema,
+    cost: 0,
+    tool,
+    detail: `ai locations "${query}"`,
+  });
+
+/**
+ * `POST /ai/lists`, `POST /ai/lists/{listId}/members`, `DELETE /ai/lists/{listId}` — 0 credits.
+ *
+ * A list is how you ask AI Search a question about creators you already have ids for: put them in
+ * a list, then search with `filters.lists` set to include it. Only the search is billed.
+ */
+export const createAiList = (
+  client: ModashClient,
+  { name, platform }: { name: string; platform: Platform },
+  tool: string,
+) =>
+  client.call({
+    request: { method: 'POST', path: '/ai/lists', body: { name, platform } },
+    schema: schemas.aiListSchema,
+    cost: 0,
+    tool,
+    detail: `create ai list (${platform})`,
+  });
+
+/** Max 10,000 ids per request. Platform user ids only; handles are rejected. */
+export const addAiListMembers = (
+  client: ModashClient,
+  { listId, influencerIds }: { listId: string; influencerIds: string[] },
+  tool: string,
+) =>
+  client.call({
+    request: { method: 'POST', path: `/ai/lists/${encodeURIComponent(listId)}/members`, body: { influencerIds } },
+    schema: schemas.aiListMembersSchema,
+    cost: 0,
+    tool,
+    detail: `add ${influencerIds.length} ids to ai list`,
+  });
+
+export const deleteAiList = (client: ModashClient, { listId }: { listId: string }, tool: string) =>
+  client.call({
+    request: { method: 'DELETE', path: `/ai/lists/${encodeURIComponent(listId)}` },
+    schema: schemas.emptySchema,
+    cost: 0,
+    tool,
+    detail: 'delete ai list',
   });
 
 /** `GET /ai/hashtags` and `GET /ai/mentions` — 0 credits. Mentions are not available for YouTube. */
@@ -174,11 +243,13 @@ export const aiTextSearch = (
     pageSize,
   }: {
     platform: Platform;
-    query: string;
+    /** Optional in the API: without one, results come back sorted by follower count. */
+    query?: string;
     filters?: unknown;
     page?: number;
     pageSize: number;
   },
+  tool = 'modash_ai_search_creators',
 ) =>
   client.call({
     request: {
@@ -188,8 +259,8 @@ export const aiTextSearch = (
     },
     schema: schemas.aiSearchSchema,
     cost: aiSearchCost(pageSize),
-    tool: 'modash_ai_search_creators',
-    detail: `${platform} "${query.slice(0, 60)}" x${pageSize}`,
+    tool,
+    detail: `${platform} "${(query ?? '').slice(0, 60)}" x${pageSize}`,
     queue: 'ai-search',
   });
 
@@ -300,12 +371,13 @@ export const getCollaborationPosts = (
     limit?: number;
     groupBrandCollaborations?: boolean;
   },
+  tool = 'modash_list_collaborations',
 ) =>
   client.call({
     request: { method: 'POST', path: '/collaborations/posts', body },
     schema: schemas.collaborationsSchema,
     cost: CREDITS.collaborations,
-    tool: 'modash_list_collaborations',
+    tool,
     detail: `${body.platform}/${body.id}`,
   });
 

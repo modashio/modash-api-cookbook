@@ -1,5 +1,5 @@
 export interface ModashHttpRequest {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'DELETE';
   /** Path relative to the API base URL, e.g. `/instagram/search`. */
   path: string;
   query?: Record<string, string | number | boolean | undefined>;

@@ -4,7 +4,7 @@
   "display_name": "Modash",
   "version": "1.0.1",
   "description": "Creator search, profile reports and brand collaboration history from the Modash API, with per-call credit metering and a session budget. Optional RAW API tools for live, unfiltered platform data.",
-  "long_description": "Gives Claude access to the Modash Discovery API: search Instagram, TikTok and YouTube creators by structured filters or by a description of their content, pull full profile reports including audience demographics and credibility, and look up brand collaboration history.\n\nModash bills per call, and some calls are far more expensive than others, so every paid tool reports what it just spent and how much of your session budget is left. A call that would breach the budget is refused before it is sent rather than reported after the fact.\n\nWithout a token it runs against synthetic fixtures, so you can try the tools and read the responses without an account.",
+  "long_description": "Gives Claude access to the Modash Discovery API: search Instagram, TikTok and YouTube creators by structured filters or by a description of their content, pull full profile reports including audience demographics and credibility, and look up brand collaboration history. One tool runs a whole analysis: do creators who post about a brand also post about its rival?\n\nModash bills per call, and some calls are far more expensive than others, so every paid tool reports what it just spent and how much of your session budget is left. A call that would breach the budget is refused before it is sent rather than reported after the fact.\n\nWithout a token it runs against synthetic fixtures, so you can try the tools and read the responses without an account.",
   "author": {
     "name": "Modash",
     "url": "https://www.modash.io"
@@ -51,7 +51,7 @@
     "credit_budget": {
       "type": "number",
       "title": "Credit budget per session",
-      "description": "Hard ceiling on Modash credits this server may spend before it starts refusing paid calls. A full profile report costs 1 credit; a search costs 0.15.",
+      "description": "Hard ceiling on Modash credits this server may spend before it starts refusing paid calls. A full profile report costs 1 credit; a search costs 0.15. Set 200 to run the brand crossover analysis, which prices itself before it runs and refuses anything above what is left.",
       "default": 5,
       "min": 0.15,
       "required": false
@@ -116,6 +116,14 @@
     {
       "name": "modash_summarise_collaborations",
       "description": "Aggregate partnership history for a creator or brand. 0.2 credits."
+    },
+    {
+      "name": "modash_plan_brand_crossover",
+      "description": "Price a brand crossover analysis and resolve the brands before running it. Free."
+    },
+    {
+      "name": "modash_brand_crossover",
+      "description": "Do creators who post about one brand also post about its rival? Compared with an unrelated pair. 0.2 credits per page of posts; refuses up front if it could exceed the budget."
     },
     {
       "name": "modash_find_creators_by_email",

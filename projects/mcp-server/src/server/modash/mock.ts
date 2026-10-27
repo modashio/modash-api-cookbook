@@ -55,22 +55,82 @@ const profileOf = (creator: MockCreator, platform: string) => ({
 const weighted = (entries: [string, string, number][]) =>
   entries.map(([code, name, weight]) => ({ code, name, weight }));
 
+/**
+ * Brands for the brand crossover tools. Invented names on the reserved `.example` domain, each
+ * with a pool of synthetic creators. Pools overlap by design: the two outdoor brands share fewer
+ * creators than the coffee and games pair, so the fixtures tell a "creators pick a side" story.
+ */
+interface MockBrand {
+  brandId: string;
+  name: string;
+  domain: string;
+  /** Creators numbered `first`..`last` post about this brand. */
+  first: number;
+  last: number;
+}
+
+const BRANDS: readonly MockBrand[] = [
+  { brandId: '00000000000000000000000000000001', name: 'Northpath Outdoors', domain: 'northpath.example', first: 1, last: 100 },
+  { brandId: '00000000000000000000000000000002', name: 'Summitline Athletic', domain: 'summitline.example', first: 31, last: 130 },
+  { brandId: '00000000000000000000000000000003', name: 'Tidewater Coffee', domain: 'tidewater.example', first: 201, last: 280 },
+  { brandId: '00000000000000000000000000000004', name: 'Pixelforge Games', domain: 'pixelforge.example', first: 211, last: 290 },
+  // A second identity on a domain, the way a sub-label can share its parent's website.
+  { brandId: '00000000000000000000000000000005', name: 'Northpath Kids', domain: 'northpath.example', first: 380, last: 420 },
+];
+
+/** AI Search locations. Synthetic creators are in 1001 or 1002, never 1003. */
+const MOCK_LOCATIONS = [
+  { id: 1001, name: 'United States', title: 'United States' },
+  { id: 1002, name: 'United Kingdom', title: 'United Kingdom' },
+  { id: 1003, name: 'Estonia', title: 'Estonia' },
+];
+
+const DAY_MS = 86_400_000;
+
+/** FNV-1a. Deterministic, so the same window always yields the same synthetic posts. */
+const hash = (text: string): number => {
+  let value = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    value ^= text.charCodeAt(i);
+    value = Math.imul(value, 0x01000193) >>> 0;
+  }
+  return value;
+};
+
+const creatorId = (n: number) => `mock-creator-${String(n).padStart(3, '0')}`;
+const creatorNumber = (id: string) => Number(id.replace('mock-creator-', ''));
+/** Four in five synthetic creators are "in" location 1001; follower counts run 2k to 201k. */
+const creatorFollowers = (n: number) => 2_000 + ((n * 7_919) % 200) * 1_000;
+const creatorLocation = (n: number) => (n % 5 === 0 ? 1002 : 1001);
+
 export class MockTransport implements ModashTransport {
+  readonly #lists = new Map<string, { platform: string; members: Set<string> }>();
+
   async send(request: ModashHttpRequest): Promise<ModashHttpResponse> {
     const body = this.#route(request);
     // Preserve the error envelope's own status so the client's error handling is exercised too.
-    const status =
-      typeof body === 'object' && body !== null && 'error' in body && body.error === true ? 400 : 200;
+    const failed = typeof body === 'object' && body !== null && 'error' in body && body.error === true;
+    const code = failed ? (body as { code?: string }).code : undefined;
+    const status = !failed ? 200 : code === 'posts_not_found' || code === 'entity_not_found' ? 404 : 400;
     return { status, body };
   }
 
-  #route({ path, query, body }: ModashHttpRequest): unknown {
+  #route({ method, path, query, body }: ModashHttpRequest): unknown {
     const segments = path.split('/').filter(Boolean);
     const search = (query ?? {}) as Record<string, string | undefined>;
     const payload = (body ?? {}) as Record<string, unknown>;
 
     if (segments[0] === 'raw') {
       return this.#raw(path, search);
+    }
+
+    if (segments[0] === 'ai' && segments[1] === 'lists') {
+      return this.#aiLists(method, segments[2], segments[3], payload);
+    }
+
+    if (path === '/ai/locations') {
+      const needle = (search['query'] ?? '').toLowerCase();
+      return { error: false, result: MOCK_LOCATIONS.filter((entry) => entry.name.toLowerCase().includes(needle)) };
     }
 
     if (path === '/user/info') {
@@ -100,15 +160,23 @@ export class MockTransport implements ModashTransport {
     }
 
     if (path === '/ai/brands') {
+      const { domain, brandId } = search;
+      const needle = (search['query'] ?? '').toLowerCase();
+      const matches = BRANDS.filter((brand) =>
+        domain !== undefined
+          ? brand.domain === domain
+          : brandId !== undefined
+            ? brand.brandId === brandId
+            : brand.name.toLowerCase().includes(needle),
+      );
       return {
         error: false,
-        result: [
-          {
-            brandId: 'mock-brand-1',
-            name: 'Tidewater Coffee',
-            accounts: [{ platform: 'instagram', username: 'tidewater.coffee', domain: 'example.invalid' }],
-          },
-        ],
+        result: matches.map((brand) => ({
+          brandId: brand.brandId,
+          name: brand.name,
+          logoUrl: PLACEHOLDER_PICTURE,
+          accounts: [{ platform: 'instagram', username: brand.domain.replace('.example', ''), domain: brand.domain }],
+        })),
       };
     }
 
@@ -129,6 +197,8 @@ export class MockTransport implements ModashTransport {
 
     // /ai/{platform}/text-search, /ai/{platform}/image-search, /ai/{platform}/lookalikes
     if (segments[0] === 'ai') {
+      const filters = payload['filters'] as { lists?: { listIds?: string[] } } | undefined;
+      if (filters?.lists !== undefined) return this.#listSearch(payload);
       return this.#aiSearch(segments[2] ?? 'text-search', payload);
     }
 
@@ -361,9 +431,138 @@ export class MockTransport implements ModashTransport {
     };
   }
 
+  /**
+   * Posts about one brand, from its synthetic creator pool. Most creators post once a week, on a
+   * day a hash picks, about one week in six is quiet (answered with the documented, unbilled
+   * `posts_not_found`), and roughly one post in nine is on TikTok, because a grouped brand id
+   * returns posts from every platform.
+   */
+  #brandPosts(brand: MockBrand, payload: Record<string, unknown>): unknown {
+    const window = (payload['postCreationTimestampMs'] ?? {}) as { gte?: number; lte?: number };
+    const gte = window.gte ?? Date.now() - 30 * DAY_MS;
+    const lte = window.lte ?? Date.now();
+    const limit = Math.min(30, Number(payload['limit'] ?? 30));
+    const offset = Number(payload['cursor'] ?? 0);
+
+    const posts = [];
+    for (let week = Math.floor(gte / (7 * DAY_MS)); week <= Math.floor(lte / (7 * DAY_MS)); week += 1) {
+      if (hash(`${brand.brandId}:week:${week}`) % 6 === 0) continue;
+      for (let n = brand.first; n <= brand.last; n += 1) {
+        const roll = hash(`${brand.brandId}:${n}:${week}`);
+        if (roll % 100 >= 85) continue;
+        const day = week * 7 + ((roll >>> 8) % 7);
+        const timestamp = day * DAY_MS + ((roll >>> 4) % 86_400) * 1000;
+        if (timestamp < gte || timestamp > lte) continue;
+        posts.push({
+          post_id: `mock-post-${brand.brandId.slice(-2)}-${day}-${n}`,
+          post_thumbnail: PLACEHOLDER_PICTURE,
+          post_timestamp: timestamp,
+          description: 'Synthetic post. Not real platform data.',
+          label: 'Properly Disclosed Sponsorship: uses #ad',
+          collaboration_type: 'Paid',
+          type: 'photo',
+          feed_type: 'feed',
+          stats: { likes: 1_000, comments: 50 },
+          sponsors: [{ name: brand.name, domain: brand.domain }],
+          user_id: creatorId(n),
+          username: `synthetic.creator.${String(n).padStart(3, '0')}`,
+          platform: (roll >>> 12) % 9 === 0 ? 'tiktok' : 'instagram',
+        });
+      }
+    }
+    posts.sort((a, b) => b.post_timestamp - a.post_timestamp);
+
+    if (posts.length === 0) {
+      return { error: true, code: 'posts_not_found', message: 'No collaboration posts found for the given filters.' };
+    }
+
+    const page = posts.slice(offset, offset + limit);
+    const more = offset + limit < posts.length;
+    return {
+      error: false,
+      ...(more ? { cursor: String(offset + limit) } : {}),
+      brand: {
+        id: brand.brandId,
+        platform: String(payload['platform'] ?? 'instagram'),
+        brand_id: brand.brandId,
+        brand_name: brand.name,
+        brand_domain: brand.domain,
+        brand_category: 'Retail',
+        is_more_available: more,
+        posts: page,
+      },
+    };
+  }
+
+  #aiLists(method: string, listId: string | undefined, sub: string | undefined, payload: Record<string, unknown>): unknown {
+    if (listId === undefined && method === 'POST') {
+      const id = `mock-list-${String(this.#lists.size + 1).padStart(4, '0')}`;
+      this.#lists.set(id, { platform: String(payload['platform'] ?? 'instagram'), members: new Set() });
+      return { listId: id, name: payload['name'], platform: payload['platform'], approximateMemberCount: 0 };
+    }
+
+    const list = listId === undefined ? undefined : this.#lists.get(listId);
+    if (list === undefined) {
+      return { error: true, code: 'entity_not_found', message: 'List not found' };
+    }
+    if (sub === 'members' && method === 'POST') {
+      const ids = (payload['influencerIds'] as string[] | undefined) ?? [];
+      const before = list.members.size;
+      for (const id of ids) list.members.add(id);
+      return {
+        addedCount: list.members.size - before,
+        existingCount: ids.length - (list.members.size - before),
+        approximateMemberCount: list.members.size,
+      };
+    }
+    if (method === 'DELETE' && sub === undefined) {
+      this.#lists.delete(listId!);
+      return {};
+    }
+    return { error: true, code: 'bad_request', message: `Unsupported list call ${method}` };
+  }
+
+  /** AI Search restricted to a list: members that pass the location and follower filters. */
+  #listSearch(payload: Record<string, unknown>): unknown {
+    const filters = payload['filters'] as {
+      lists: { listIds: string[]; mode: string };
+      locations?: number[];
+      followersCount?: { min?: number };
+    };
+    const list = this.#lists.get(filters.lists.listIds[0] ?? '');
+    if (list === undefined) {
+      return { error: true, code: 'bad_request', message: 'Unknown list id' };
+    }
+    const page = Number(payload['page'] ?? 0);
+    const pageSize = Number(payload['pageSize'] ?? 6);
+
+    const matching = [...list.members]
+      .map(creatorNumber)
+      .filter((n) => filters.locations === undefined || filters.locations.includes(creatorLocation(n)))
+      .filter((n) => creatorFollowers(n) >= (filters.followersCount?.min ?? 0))
+      .sort((a, b) => creatorFollowers(b) - creatorFollowers(a));
+
+    return {
+      error: false,
+      total: matching.length,
+      profiles: matching.slice(page * pageSize, (page + 1) * pageSize).map((n) => ({
+        userId: creatorId(n),
+        username: `synthetic.creator.${String(n).padStart(3, '0')}`,
+        fullName: 'Synthetic Creator',
+        url: `https://example.invalid/${creatorId(n)}`,
+        profilePicture: PLACEHOLDER_PICTURE,
+        followersCount: creatorFollowers(n),
+        engagementRate: 0.03,
+      })),
+    };
+  }
+
   #collaborations(path: string, payload: Record<string, unknown>): unknown {
     const platform = String(payload['platform'] ?? 'instagram');
     const id = String(payload['id'] ?? '');
+
+    const brand = BRANDS.find((entry) => entry.brandId === id);
+    if (brand !== undefined && path === '/collaborations/posts') return this.#brandPosts(brand, payload);
     const creator = CREATORS.find((entry) => entry.username === id || entry.userId === id) ?? CREATORS[0]!;
 
     if (path === '/collaborations/summary') {
