@@ -69,6 +69,7 @@ describe('server surface', () => {
 
     assert.deepEqual(names, [
       'modash_ai_search_creators',
+      'modash_brand_crossover',
       'modash_compare_audience_overlap',
       'modash_find_creator',
       'modash_find_creators_by_email',
@@ -78,6 +79,7 @@ describe('server surface', () => {
       'modash_list_collaborations',
       'modash_lookup_ai_dictionary',
       'modash_lookup_dictionary',
+      'modash_plan_brand_crossover',
       'modash_search_creators',
       'modash_summarise_collaborations',
     ]);

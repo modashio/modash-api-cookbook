@@ -70,6 +70,8 @@ prices are in the [API reference](https://docs.modash.io):
 | `modash_list_collaborations` | **0.2** | Up to 30 posts |
 | `modash_summarise_collaborations` | **0.2** | |
 | `modash_find_creators_by_email` | **0.02 per match** | Balance must cover every address submitted |
+| `modash_plan_brand_crossover` | 0 | Resolves brands and prices a crossover run before it starts |
+| `modash_brand_crossover` | **0.2 per page + 0.025 per lookup** | Many calls in one. Asks to confirm above 20 credits, refuses above the session budget. [See below](#brand-crossover-do-creators-pick-a-side) |
 
 The six optional RAW tools do not appear here because they do not spend credits at all — they
 spend RAW requests, one per call, from a different allowance. See
@@ -120,7 +122,7 @@ The [RAW API](https://www.modash.io/influencer-marketing-api/raw) is a **separat
 unfiltered data pulled from the platforms at the moment you ask, rather than Modash's analysis of
 it. Set `MODASH_RAW=true` to add its six tools; they are off by default, because an account
 without the product answers every one of them with `feature_not_available`, and six dead tools
-crowd out the twelve that work.
+crowd out the fourteen that work.
 
 Three things about it are the opposite of Discovery, and all three change how you write the client:
 
@@ -155,6 +157,102 @@ They also take a `maxItems` (default 10) that caps how many entries of each list
 page is tens of thousands of tokens; a model that pulls three of them has spent its context before
 reading any. The cap is local and the result says `capped: true` when it fires — you paid for the
 whole page either way.
+
+---
+
+## Brand crossover: do creators pick a side?
+
+Two tools answer one question: of the creators who post about a brand, how many also post about
+its rival? Ask Claude something like *"Do creators who post about Canon also post about Nikon?"*
+and it calls `modash_plan_brand_crossover` (free), shows you the price, then calls
+`modash_brand_crossover`.
+
+### The method
+
+1. Resolve each brand to a brand id with `GET /ai/brands`. Free. A domain is the most reliable
+   input; a name can match several brand identities, and the plan lists the alternatives.
+2. Pull the posts Modash attributes to each brand from `POST /collaborations/posts`, passing that
+   brand id as `id`, one 7-day window at a time. 0.2 credits per page of up to 30 posts. An empty
+   week answers `posts_not_found`, which is not billed.
+3. Creators in both lists are the **crossover**. Creators in either list are the **base**. The
+   share is crossover ÷ base, reported alongside the share of each brand's creators who also
+   posted about the other.
+4. Optionally, keep only creators in a place or above a follower count. The posts log carries
+   neither, so the tool puts the crossover creators and a seeded random sample of the rest of the
+   base into a temporary AI Search list (`POST /ai/lists`, free), asks AI Search which of them
+   match (`/ai/{platform}/text-search` with the `lists` filter, 0.025 credits per profile
+   returned), scales the sample up, and deletes the list.
+5. Run two unrelated brands the same way. A share on its own says little — it depends on how
+   often creators post at all. The ratio of the rival share to the unrelated share is the answer:
+   below 0.8 reads as "picking a side", above 1.25 as "shared creators", and anything with fewer
+   than 30 crossover creators is called noise.
+
+### What it costs
+
+Nothing tells you a brand's post volume for free, so the tool cannot forecast the cost. It works
+out a **ceiling** instead, from the documented prices:
+
+- posts: brands × weeks pulled × `maxPagesPerWeek` × 0.2
+- lookups (only with `location` or `minFollowers`): pairs × ⌈(`maxCrossoverLookups` +
+  `baseSampleSize`) ÷ 50⌉ × 1.25
+
+Real runs cost less: quiet brands stop before the page cap and empty weeks are free.
+
+| Run | Ceiling |
+| --- | --- |
+| Defaults: rivals plus baseline, 6 sampled weeks, 3 pages a week | 14.4 |
+| The same, restricted to one country and 10k+ followers | 29.4 |
+| Every week of the default 91-day window (13), 3 pages a week, four brands | 31.2 |
+| Every week of a year (53), 3 pages a week, four brands | 127.2 |
+| Every week of a year, 10 pages a week, four brands | 424 |
+
+**Two ceilings apply, and either one can stop a run before it spends anything:**
+
+1. **The session budget (`MODASH_CREDIT_BUDGET`) is absolute.** A run refuses outright, no matter
+   what the caller sends, if its ceiling is above what is left of the budget. **Set it to 200 to
+   run this analysis**; the default of 5 is sized for single calls. In Claude Desktop that is the
+   extension setting **Credit budget per session** — change it, then restart the extension.
+2. **A per-run limit of 20 credits needs explicit confirmation.** Above that, `modash_brand_crossover`
+   does not spend anything: it returns the ceiling, the cheaper settings, and asks for the spend
+   to be confirmed by setting `confirmCredits` to at least the ceiling on the next call. This is
+   there so a model cannot quietly spend fifty credits because the user asked an open-ended
+   question — it is expected to show the estimate and wait for the user to say yes, not to set
+   `confirmCredits` on its own. Confirming still cannot get around the session budget in (1).
+
+When a run does not fit either ceiling, both tools list cheaper settings, each priced the same
+way: the most weeks that fit, fewer pages a week, a shorter window, or dropping the creator
+filter.
+
+**The default window is the last 91 days (13 complete weeks),** not a full year. That keeps the
+default run's ceiling under the 20-credit confirmation limit and keeps it fast enough to finish
+before most MCP clients give up on a tool call, typically after about 60 seconds. A longer
+`windowDays` is still allowed — a full year is 53 weeks — it just costs more and, like anything
+else over 20 credits, needs the same confirmation step.
+
+**Sampling.** `sampleWeeks` spreads the pulled weeks evenly over the window, so a sample covers
+every season. It is the main lever on cost, and it has a known bias: a creator who posted about
+the two brands in different weeks is missed, so absolute shares come out low. The rival and
+baseline pairs are sampled the same way, which is why the comparison holds up better than either
+number. Setting `sampleWeeks` to the full week count of the window pulls every week.
+
+**Time.** Collaboration pages run at two a second and AI Search at one a second, all serially.
+The plan reports the worst case. Some MCP clients stop waiting after 60 seconds, which is the
+main reason the defaults are small — a confirmed, fuller run can still take a minute or more.
+
+### What is left out, and why
+
+The tools use only documented behaviour. These parts of a hand-run version of this analysis were
+replaced or dropped:
+
+- **Sizing a brand with `/collaborations/summary`.** That endpoint does not document a brand id,
+  so the tool prices a ceiling instead of counting posts first.
+- **Retrying a page that answers `posts_not_found` mid-week.** Undocumented. The tool treats it as
+  the end of that week.
+- **Costs measured from the account balance.** The ledger uses the documented prices.
+- **Parallel workers.** Every call is serial, to stay inside the documented rate limits.
+- **Hardcoded location ids.** Places are resolved with `GET /ai/locations` on each run.
+- **Gap between the two posts, and disclosure labels.** Not part of the question the tool answers.
+- **Automatically choosing a size-matched baseline pair.** The caller names the baseline brands.
 
 ---
 
@@ -223,7 +321,8 @@ manifest and a self-contained server — with a double click. There is nothing t
 then double-click it or drag it into the Claude Desktop window.
 
 It asks for your token on install and stores it in the OS keychain; leave it blank to run on
-fixtures. Dependencies are bundled into a single file, so nothing is installed at run time.
+fixtures. It also asks for a credit budget per session, which defaults to 5; set 200 to run the
+[brand crossover analysis](#brand-crossover-do-creators-pick-a-side). Dependencies are bundled into a single file, so nothing is installed at run time.
 
 Each release also carries a `.sha256`, and the build is reproducible — the same commit produces
 the same bytes — so a bundle you build yourself should match the one you downloaded:
@@ -432,7 +531,7 @@ two commands.
 ### Testing
 
 ```bash
-npm test        # 96 tests, mock mode, no token, no network
+npm test        # 117 tests, mock mode, no token, no network
 npm run typecheck
 npm run build
 ```
@@ -446,7 +545,7 @@ apart.
 
 ## How it maps to the API
 
-Modash publishes 44 Discovery operations and 33 RAW ones. This server exposes 12 tools, plus 6
+Modash publishes 44 Discovery operations and 33 RAW ones. This server exposes 14 tools, plus 6
 optional RAW tools.
 
 That is deliberate. A tool list is not documentation — it is re-serialised into the model's context
@@ -480,6 +579,8 @@ src/
     context.ts                Wires the client and the ledger together
     result.ts                 Cost envelope, error results
     tools/                    One file per group of tools
+  analysis/
+    brand-crossover.ts        The crossover method: which calls, in what order, what the numbers mean
   server/modash/              Everything that knows about Modash
     endpoints.ts              One function per Discovery endpoint: path, cost, schema
     raw.ts                    The RAW API: endpoints, cursor normalising, list capping

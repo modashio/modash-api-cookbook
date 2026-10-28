@@ -98,6 +98,28 @@ export const aiBrandsSchema = z.looseObject({
     .optional(),
 });
 
+/** `GET /ai/locations`. These ids are only valid in AI Search filters, not in regular search. */
+export const aiLocationsSchema = z.looseObject({
+  ...errorFlag,
+  result: z.array(z.looseObject({ id: number, name: string, title: string })).optional(),
+});
+
+export const aiListSchema = z.looseObject({
+  ...errorFlag,
+  listId: z.string(),
+  approximateMemberCount: number,
+});
+
+export const aiListMembersSchema = z.looseObject({
+  ...errorFlag,
+  addedCount: number,
+  existingCount: number,
+  approximateMemberCount: number,
+});
+
+/** `DELETE /ai/lists/{listId}` documents no 200 body, so accept whatever comes back. */
+export const emptySchema = z.unknown();
+
 export const aiTagsSchema = z.looseObject({
   ...errorFlag,
   result: z.array(z.looseObject({ value: string, count: number })).optional(),
@@ -303,6 +325,8 @@ const collaborationPostSchema = z.looseObject({
   collaboration_type: string,
   stats: z.looseObject({ likes: number, comments: number, views: number, plays: number }).optional(),
   sponsors: z.array(z.looseObject({ name: string, domain: string, category: string })).optional(),
+  /** Brand-side posts only: the creator who published the post. */
+  user_id: string,
   username: string,
   platform: string,
 });

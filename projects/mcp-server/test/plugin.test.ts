@@ -118,6 +118,7 @@ describe('Claude Desktop bundle', () => {
     const declared = mcpbManifest['tools'].map((tool: { name: string }) => tool.name).sort();
     const registered = [
       'modash_ai_search_creators',
+      'modash_brand_crossover',
       'modash_compare_audience_overlap',
       'modash_find_creator',
       'modash_find_creators_by_email',
@@ -127,6 +128,7 @@ describe('Claude Desktop bundle', () => {
       'modash_list_collaborations',
       'modash_lookup_ai_dictionary',
       'modash_lookup_dictionary',
+      'modash_plan_brand_crossover',
       'modash_raw_browse',
       'modash_raw_get_post',
       'modash_raw_get_profile',

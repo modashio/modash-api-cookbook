@@ -6,6 +6,7 @@ import { CREDITS, SEARCH_RESULTS_PER_PAGE } from '../server/modash/pricing.js';
 import type { ToolContext } from './context.js';
 import { registerAccountTools } from './tools/account.js';
 import { registerCollaborationTools } from './tools/collaborations.js';
+import { registerCrossoverTools } from './tools/crossover.js';
 import { registerDiscoveryTools } from './tools/discovery.js';
 import { registerRawTools } from './tools/raw.js';
 import { registerReportTools } from './tools/reports.js';
@@ -14,7 +15,7 @@ import { registerSearchTools } from './tools/search.js';
 export const SERVER_INFO = { name: 'modash', version: '1.0.1' } as const;
 
 /**
- * Twelve tools over an API with forty-four endpoints.
+ * Twelve tools over an API with forty-four endpoints, plus two that run one analysis end to end.
  *
  * The mapping is deliberately lossy. A tool list is not documentation — it is re-sent to the model
  * on every single turn, and selection accuracy falls off well before forty options. So the
@@ -34,6 +35,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
   registerSearchTools(server, ctx);
   registerReportTools(server, ctx);
   registerCollaborationTools(server, ctx);
+  registerCrossoverTools(server, ctx);
 
   // The RAW API is sold separately from Discovery, so its tools stay out of the list unless the
   // reader says they have it. Six more tools help nobody whose plan answers every one of them
@@ -67,6 +69,7 @@ function registerResources(server: McpServer, ctx: ToolContext): void {
                 'modash_find_creator',
                 'modash_lookup_dictionary',
                 'modash_lookup_ai_dictionary',
+                'modash_plan_brand_crossover',
               ],
               paid: {
                 modash_search_creators: `${CREDITS.searchPerResult} per result, ${SEARCH_RESULTS_PER_PAGE} results per page (page size is fixed)`,
@@ -77,6 +80,7 @@ function registerResources(server: McpServer, ctx: ToolContext): void {
                 modash_list_collaborations: `${CREDITS.collaborations} per call`,
                 modash_summarise_collaborations: `${CREDITS.collaborations} per call`,
                 modash_find_creators_by_email: `${CREDITS.emailSearchPerEmail} per matched email`,
+                modash_brand_crossover: `${CREDITS.collaborations} per page of 30 posts per brand-week, plus ${CREDITS.aiSearchPerProfile} per creator returned by the optional location/follower lookup. Refuses up front if its worst case exceeds the remaining budget; modash_plan_brand_crossover prices it for free`,
               },
               rawApi: ctx.raw
                 ? {
