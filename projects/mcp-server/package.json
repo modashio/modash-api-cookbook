@@ -1,6 +1,6 @@
 {
   "name": "modash-mcp-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "An MCP server that exposes the Modash Discovery API to LLM clients, with credit metering, a per-session budget cap, and a mock mode that needs no token.",
   "type": "module",

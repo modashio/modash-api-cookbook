@@ -1,7 +1,7 @@
 {
   "name": "modash-api-mcp",
   "displayName": "Modash",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Creator search, profile reports with audience demographics, and brand collaboration history from the Modash API. Meters credit spend per call and enforces a per-session budget. Runs against synthetic fixtures with no token.",
   "author": {
     "name": "Modash",

@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "modash-api-mcp",
   "display_name": "Modash",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Creator search, profile reports and brand collaboration history from the Modash API, with per-call credit metering and a session budget. Optional RAW API tools for live, unfiltered platform data.",
   "long_description": "Gives Claude access to the Modash Discovery API: search Instagram, TikTok and YouTube creators by structured filters or by a description of their content, pull full profile reports including audience demographics and credibility, and look up brand collaboration history. One tool runs a whole analysis: do creators who post about a brand also post about its rival?\n\nModash bills per call, and some calls are far more expensive than others, so every paid tool reports what it just spent and how much of your session budget is left. A call that would breach the budget is refused before it is sent rather than reported after the fact.\n\nWithout a token it runs against synthetic fixtures, so you can try the tools and read the responses without an account.",
   "author": {

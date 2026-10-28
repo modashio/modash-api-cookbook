@@ -328,7 +328,7 @@ Each release also carries a `.sha256`, and the build is reproducible — the sam
 the same bytes — so a bundle you build yourself should match the one you downloaded:
 
 ```bash
-npm run build:mcpb                       # writes build/modash-api-mcp-1.0.1.mcpb
+npm run build:mcpb                       # writes build/modash-api-mcp-1.0.2.mcpb
 npm run verify:mcpb                      # unpacks it, starts it, and calls a free tool
 shasum -a 256 build/*.mcpb
 ```
