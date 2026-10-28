@@ -12,7 +12,7 @@ import { registerRawTools } from './tools/raw.js';
 import { registerReportTools } from './tools/reports.js';
 import { registerSearchTools } from './tools/search.js';
 
-export const SERVER_INFO = { name: 'modash', version: '1.0.1' } as const;
+export const SERVER_INFO = { name: 'modash', version: '1.0.2' } as const;
 
 /**
  * Twelve tools over an API with forty-four endpoints, plus two that run one analysis end to end.
