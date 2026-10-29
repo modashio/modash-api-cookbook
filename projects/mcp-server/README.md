@@ -162,6 +162,8 @@ whole page either way.
 
 ## Brand crossover: do creators pick a side?
 
+[One-screen quick start for Claude Desktop](./brand-crossover).
+
 Two tools answer one question: of the creators who post about a brand, how many also post about
 its rival? Ask Claude something like *"Do creators who post about Canon also post about Nikon?"*
 and it calls `modash_plan_brand_crossover` (free), shows you the price, then calls
