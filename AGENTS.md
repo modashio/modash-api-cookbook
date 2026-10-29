@@ -50,6 +50,17 @@ unreleased features, infrastructure details, roadmap items, internal ticket refe
 undocumented behaviour discovered by poking at the API. If something is genuinely useful but
 undocumented, the right move is to get it into the public docs first.
 
+### Public interfaces
+
+- Treat every public name and doc as customer-facing copy. That covers query params,
+  request and response fields, error messages, URLs, API docs, OpenAPI, and in this repo
+  every example, README, notebook, comment, and sample.
+- Name them for what the customer sees. Keep internal, vendor, sourcing, and
+  data-provenance terms out of them. That includes "in-house", "third party", vendor
+  names, and internal table names.
+- Before you approve a public interface change, check it for those terms.
+- When you spot an existing leak, flag it or fix it.
+
 ### Respect credits
 
 Paid endpoints spend real money from the reader's account. Every project must:
