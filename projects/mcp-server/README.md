@@ -266,18 +266,39 @@ entirely synthetic sample of 25 invented creators, in
 [`data/creator_sample_synthetic.csv`](./data/creator_sample_synthetic.csv), so you can try them in
 mock mode. Every result says which dataset it came from (`bundled synthetic sample` or `custom`).
 
-To use your own file, put the CSV anywhere and point the server at it:
+To use your own data, pick one of two sources. If both are set, the file wins; if neither is set,
+the bundled sample is served.
+
+**A local file.** Put the CSV anywhere and point the server at it:
 
 ```bash
 CREATOR_DATASET_PATH=/path/to/your/creators.csv npm run dev
 ```
 
-Claude Desktop asks for the file in the install dialog (the optional "Creator dataset CSV"
-setting); Claude Code and Cursor read `CREATOR_DATASET_PATH` from your shell. The file is read
-lazily on the first call, parsed once and kept in memory. The path is never printed, returned or
-logged, and a file that is missing or malformed fails with a message that does not repeat it. Keep
-your own file out of git: the repository ignores `creator_10m_followers_sep26.csv` and
-`data/*.private.csv`, but a file you name differently is your responsibility.
+**An https URL.** Set `CREATOR_DATASET_URL` to a link to the same CSV, for example a presigned
+download link:
+
+```bash
+CREATOR_DATASET_URL='https://…' npm run dev
+```
+
+The URL must be `https`; `http` and every other scheme are refused. It is downloaded once, on the
+first tool call, and kept in memory for the life of the process, so later calls never touch the
+network. The download times out after 30 seconds, is refused above 50 MB, and does not follow
+redirects.
+
+Claude Desktop asks for either in the install dialog (the optional "Creator dataset CSV" and
+"Creator dataset URL" settings, the second stored as a secret); Claude Code and Cursor read
+`CREATOR_DATASET_PATH` and `CREATOR_DATASET_URL` from your shell. A file is read lazily on the first
+call, parsed once and kept in memory. Neither the path nor the URL is ever printed, returned or
+logged, and a source that is missing, unreachable or malformed fails with a message that does not
+repeat it. Keep your own file out of git: the repository ignores `creator_10m_followers_sep26.csv`
+and `data/*.private.csv`, but a file you name differently is your responsibility.
+
+**A presigned link is a bearer credential.** Anyone holding it can download the file until it
+expires, because the signature sits in the query string. Keep it in the environment variable or the
+install setting, never in a chat with the model, an issue, a commit or a `.env` file you might
+share. Prefer a short expiry.
 
 | Tool | Input | Returns |
 | --- | --- | --- |
@@ -339,7 +360,8 @@ you have not filled in yet cannot start spending or start failing on a placehold
 | `MODASH_CREDIT_BUDGET` | `5` | Hard ceiling on credits for this process |
 | `MODASH_RAW` | `false` | Expose the RAW API tools. Separate product; see below |
 | `MODASH_RAW_BUDGET` | `50` | Hard ceiling on RAW *requests* for this process |
-| `CREATOR_DATASET_PATH` | bundled synthetic sample | CSV read by `creator_lookup` and `creator_search`. See [above](#query-a-csv-of-creators-you-keep-locally) |
+| `CREATOR_DATASET_PATH` | bundled synthetic sample | CSV file read by `creator_lookup` and `creator_search`. Wins over the URL. See [above](#query-a-csv-of-creators-you-keep-locally) |
+| `CREATOR_DATASET_URL` | — | https link to the same CSV, downloaded once. Treat it as a secret |
 | `PORT` | `3000` | Streamable HTTP port. Ignored on stdio |
 | `MODASH_HTTP_HOST` | `127.0.0.1` | Interface the HTTP transport binds to. Widen it only deliberately |
 
@@ -589,7 +611,7 @@ two commands.
 ### Testing
 
 ```bash
-npm test        # 146 tests, mock mode, no token, no network
+npm test        # 157 tests, mock mode, no token, no network
 npm run typecheck
 npm run build
 ```

@@ -36,6 +36,6 @@ export function createToolContext(config: Config): ToolContext {
     rawLedger,
     mock: config.mock,
     raw: config.raw,
-    creators: new CreatorDataset(config.creatorDatasetPath),
+    creators: new CreatorDataset({ path: config.creatorDatasetPath, url: config.creatorDatasetUrl }),
   };
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { after, describe, it } from 'node:test';
+import { after, afterEach, describe, it } from 'node:test';
 
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
@@ -13,6 +13,7 @@ import {
   COLUMNS,
   CreatorDataset,
   parseCreators,
+  URL_MAX_BYTES,
 } from '../src/creators/dataset.js';
 import { lookupCreators, searchCreators } from '../src/creators/query.js';
 import { createMcpHandler } from '../src/mcp/handler.js';
@@ -362,7 +363,180 @@ describe('a private dataset path', () => {
   });
 
   it('loads the file once and reuses it', async () => {
-    const dataset = new CreatorDataset(path);
+    const dataset = new CreatorDataset({ path });
     assert.equal(await dataset.load(), await dataset.load());
+  });
+});
+
+describe('a dataset URL', () => {
+  const secretQuery = 'X-Amz-Signature=supersecretsignature';
+  const url = `https://bucket-name.invalid/folder/creators.csv?${secretQuery}`;
+  const fragments = [url, secretQuery, 'supersecretsignature', 'bucket-name.invalid', 'folder/creators.csv'];
+
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const header = COLUMNS.join(',');
+  const row = COLUMNS.map((column) =>
+    ({ creator_id: 'u1', name: 'Invented Download', max_followers: '15000000', tt_handle: 'invented_dl' })[
+      column as string
+    ] ?? '',
+  ).join(',');
+  const csv = `${header}\n${row}\n`;
+
+  const stubFetch = (respond: (input: unknown, init?: RequestInit) => Response | Promise<Response>) => {
+    const calls: unknown[] = [];
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      calls.push(input);
+      return respond(input, init);
+    }) as typeof fetch;
+    return calls;
+  };
+
+  const lookup = async (config: Config, query = 'invented_dl') => {
+    const session = await connect(config);
+    try {
+      return await call(session.client, 'creator_lookup', { query });
+    } finally {
+      await session.close();
+    }
+  };
+
+  it('is read from CREATOR_DATASET_URL', () => {
+    assert.equal(loadConfig({ CREATOR_DATASET_URL: url }).creatorDatasetUrl, url);
+    assert.equal(loadConfig({ CREATOR_DATASET_URL: '' }).creatorDatasetUrl, undefined);
+    assert.equal(loadConfig({}).creatorDatasetUrl, undefined);
+  });
+
+  it('downloads once and serves later calls from memory', async () => {
+    const calls = stubFetch(() => new Response(csv));
+    const session = await connect({ ...baseConfig, creatorDatasetUrl: url });
+    try {
+      const first = await call(session.client, 'creator_lookup', { query: 'invented_dl' });
+      const second = await call(session.client, 'creator_search', { filters: { platform: 'tiktok' } });
+
+      assert.equal(first.data?.['dataset'], 'custom');
+      assert.equal(first.data?.['rows'][0].name, 'Invented Download');
+      assert.equal(second.data?.['rows'][0].creator_id, 'u1');
+      assert.equal(calls.length, 1);
+
+      const everything = JSON.stringify([first, second]);
+      for (const fragment of fragments) assert.ok(!everything.includes(fragment), `leaked ${fragment}`);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('rejects http and other schemes without fetching', async () => {
+    const calls = stubFetch(() => new Response(csv));
+    for (const rejected of [
+      'http://bucket-name.invalid/creators.csv?token=supersecretsignature',
+      'ftp://bucket-name.invalid/creators.csv',
+      'file:///tmp/creators.csv',
+      'not a url supersecretsignature',
+    ]) {
+      const result = await lookup({ ...baseConfig, creatorDatasetUrl: rejected });
+      assert.equal(result.isError, true);
+      assert.match(result.text, /must be a valid https URL/);
+      assert.ok(!result.text.includes('supersecretsignature'));
+      assert.ok(!result.text.includes('bucket-name.invalid'));
+    }
+    assert.equal(calls.length, 0);
+  });
+
+  it('reports a non-200 answer without the URL', async () => {
+    stubFetch(() => new Response('denied', { status: 403 }));
+    const result = await lookup({ ...baseConfig, creatorDatasetUrl: url });
+    assert.equal(result.isError, true);
+    assert.match(result.text, /HTTP 403/);
+    for (const fragment of fragments) assert.ok(!result.text.includes(fragment), `leaked ${fragment}`);
+  });
+
+  it('does not repeat a network error that contains the URL, in results or logs', async () => {
+    stubFetch(() => {
+      throw new TypeError(`fetch failed for ${url}`, { cause: new Error(url) });
+    });
+    const logged: string[] = [];
+    const originals = { log: console.log, error: console.error, warn: console.warn };
+    console.log = console.error = console.warn = (...args: unknown[]) => void logged.push(args.map(String).join(' '));
+    let result;
+    try {
+      result = await lookup({ ...baseConfig, creatorDatasetUrl: url });
+    } finally {
+      Object.assign(console, originals);
+    }
+    assert.equal(result.isError, true);
+    assert.match(result.text, /could not be reached/);
+    for (const fragment of fragments) {
+      assert.ok(!result.text.includes(fragment), `leaked ${fragment}`);
+      assert.ok(!logged.join('\n').includes(fragment), `logged ${fragment}`);
+    }
+  });
+
+  it('rejects a body over the size limit, declared or streamed', async () => {
+    stubFetch(() => new Response('x', { headers: { 'content-length': String(URL_MAX_BYTES + 1) } }));
+    const declared = await lookup({ ...baseConfig, creatorDatasetUrl: url });
+    assert.equal(declared.isError, true);
+    assert.match(declared.text, /larger than 50 MB/);
+
+    const chunk = new Uint8Array(1024 * 1024).fill(97);
+    stubFetch(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.enqueue(chunk);
+            },
+          }),
+        ),
+    );
+    const streamed = await lookup({ ...baseConfig, creatorDatasetUrl: url });
+    assert.equal(streamed.isError, true);
+    assert.match(streamed.text, /larger than 50 MB/);
+    for (const fragment of fragments) assert.ok(!streamed.text.includes(fragment));
+  });
+
+  it('refuses redirects and sets a timeout', async () => {
+    let init: RequestInit | undefined;
+    stubFetch((_input, options) => {
+      init = options;
+      return new Response(csv);
+    });
+    await lookup({ ...baseConfig, creatorDatasetUrl: url });
+    assert.equal(init?.redirect, 'error');
+    assert.ok(init?.signal instanceof AbortSignal);
+  });
+
+  it('reports a timeout without the URL', async () => {
+    stubFetch(() => {
+      throw new DOMException(`timed out fetching ${url}`, 'TimeoutError');
+    });
+    const result = await lookup({ ...baseConfig, creatorDatasetUrl: url });
+    assert.equal(result.isError, true);
+    assert.match(result.text, /longer than 30 seconds/);
+    for (const fragment of fragments) assert.ok(!result.text.includes(fragment));
+  });
+
+  it('prefers the local file over the URL', async () => {
+    const calls = stubFetch(() => new Response(csv));
+    const directory = mkdtempSync(join(tmpdir(), 'precedence-'));
+    const path = join(directory, 'local.csv');
+    writeFileSync(path, csv.replace('Invented Download', 'Invented Local File'));
+    try {
+      const result = await lookup({ ...baseConfig, creatorDatasetPath: path, creatorDatasetUrl: url });
+      assert.equal(result.data?.['rows'][0].name, 'Invented Local File');
+      assert.equal(calls.length, 0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the bundled sample when neither is set', async () => {
+    const calls = stubFetch(() => new Response(csv));
+    const result = await lookup(baseConfig, 'synthetic_ig_02');
+    assert.equal(result.data?.['dataset'], 'bundled synthetic sample');
+    assert.equal(calls.length, 0);
   });
 });

@@ -10,7 +10,8 @@
         "MODASH_CREDIT_BUDGET": "${env:MODASH_CREDIT_BUDGET}",
         "MODASH_RAW": "${env:MODASH_RAW}",
         "MODASH_RAW_BUDGET": "${env:MODASH_RAW_BUDGET}",
-        "CREATOR_DATASET_PATH": "${env:CREATOR_DATASET_PATH}"
+        "CREATOR_DATASET_PATH": "${env:CREATOR_DATASET_PATH}",
+        "CREATOR_DATASET_URL": "${env:CREATOR_DATASET_URL}"
       }
     }
   }

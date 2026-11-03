@@ -143,6 +143,17 @@ describe('Claude Desktop bundle', () => {
     assert.deepEqual(declared, registered);
   });
 
+  it('offers the dataset URL as an optional secret passed through as CREATOR_DATASET_URL', () => {
+    const setting = mcpbManifest['user_config'].creator_dataset_url;
+    assert.equal(setting.type, 'string');
+    assert.equal(setting.sensitive, true, 'a presigned link is a credential');
+    assert.notEqual(setting.required, true);
+    assert.equal(
+      mcpbManifest['server'].mcp_config.env.CREATOR_DATASET_URL,
+      '${user_config.creator_dataset_url}',
+    );
+  });
+
   it('offers RAW as an opt-in, defaulting off', () => {
     const enableRaw = mcpbManifest['user_config'].enable_raw;
     assert.equal(enableRaw.type, 'boolean');

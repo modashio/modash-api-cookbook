@@ -37,7 +37,8 @@
         "MODASH_CREDIT_BUDGET": "${user_config.credit_budget}",
         "MODASH_RAW": "${user_config.enable_raw}",
         "MODASH_RAW_BUDGET": "${user_config.raw_budget}",
-        "CREATOR_DATASET_PATH": "${user_config.creator_dataset_path}"
+        "CREATOR_DATASET_PATH": "${user_config.creator_dataset_path}",
+        "CREATOR_DATASET_URL": "${user_config.creator_dataset_url}"
       }
     }
   },
@@ -75,7 +76,14 @@
     "creator_dataset_path": {
       "type": "file",
       "title": "Creator dataset CSV (optional)",
-      "description": "A CSV of creators you keep on your own machine, in the column layout described in the project README. Leave blank to use the bundled synthetic sample.",
+      "description": "A CSV of creators you keep on your own machine, in the column layout described in the project README. Leave blank to use the bundled synthetic sample. Takes precedence over the dataset URL.",
+      "required": false
+    },
+    "creator_dataset_url": {
+      "type": "string",
+      "title": "Creator dataset URL (optional)",
+      "description": "An https link to the same CSV, for example a presigned download link. Downloaded once and kept in memory. Treat the link like a password: it may carry credentials. Used only when no dataset file is set; leave both blank to use the bundled synthetic sample.",
+      "sensitive": true,
       "required": false
     }
   },

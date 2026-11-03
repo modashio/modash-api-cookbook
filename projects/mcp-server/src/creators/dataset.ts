@@ -195,13 +195,84 @@ export const LOAD_FAILURE =
   'The creator dataset could not be loaded. Check that CREATOR_DATASET_PATH points to a readable ' +
   'CSV with the expected columns, or unset it to use the bundled synthetic sample.';
 
+export const URL_LOAD_FAILURE = 'The creator dataset could not be downloaded from CREATOR_DATASET_URL.';
+
+export const INVALID_URL =
+  'CREATOR_DATASET_URL must be a valid https URL. http and other schemes are rejected.';
+
+export const URL_TIMEOUT_MS = 30_000;
+
+export const URL_MAX_BYTES = 50 * 1024 * 1024;
+
+class DatasetError extends Error {}
+
+export interface CreatorDatasetSource {
+  path?: string | undefined;
+  url?: string | undefined;
+}
+
+async function downloadText(url: string): Promise<string> {
+  let target: URL;
+  try {
+    target = new URL(url);
+  } catch {
+    throw new DatasetError(INVALID_URL);
+  }
+  if (target.protocol !== 'https:') throw new DatasetError(INVALID_URL);
+
+  const tooLarge = new DatasetError(
+    `${URL_LOAD_FAILURE} The file is larger than ${URL_MAX_BYTES / 1024 / 1024} MB.`,
+  );
+
+  try {
+    const response = await fetch(target, {
+      redirect: 'error',
+      signal: AbortSignal.timeout(URL_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      throw new DatasetError(`${URL_LOAD_FAILURE} The server answered HTTP ${response.status}.`);
+    }
+
+    const declared = Number(response.headers.get('content-length'));
+    if (declared > URL_MAX_BYTES) throw tooLarge;
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new DatasetError(`${URL_LOAD_FAILURE} The response had no body.`);
+
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > URL_MAX_BYTES) {
+        await reader.cancel();
+        throw tooLarge;
+      }
+      chunks.push(value);
+    }
+
+    return Buffer.concat(chunks).toString('utf8');
+  } catch (error) {
+    if (error instanceof DatasetError) throw error;
+    const name = error instanceof Error ? error.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      throw new DatasetError(
+        `${URL_LOAD_FAILURE} The download took longer than ${URL_TIMEOUT_MS / 1000} seconds.`,
+      );
+    }
+    throw new DatasetError(`${URL_LOAD_FAILURE} The server could not be reached.`);
+  }
+}
+
 export class CreatorDataset {
   private rows: Promise<CreatorRow[]> | undefined;
 
-  constructor(private readonly customPath: string | undefined) {}
+  constructor(private readonly source: CreatorDatasetSource = {}) {}
 
   get isCustom(): boolean {
-    return this.customPath !== undefined;
+    return this.source.path !== undefined || this.source.url !== undefined;
   }
 
   async load(): Promise<CreatorRow[]> {
@@ -213,18 +284,23 @@ export class CreatorDataset {
   }
 
   private async read(): Promise<CreatorRow[]> {
+    const { path, url } = this.source;
+    const failure = path !== undefined || url === undefined ? LOAD_FAILURE : URL_LOAD_FAILURE;
+
     let text: string;
     try {
-      text = await readFile(this.customPath ?? bundledSamplePath(), 'utf8');
-    } catch {
-      throw new Error(LOAD_FAILURE);
+      text = path !== undefined || url === undefined
+        ? await readFile(path ?? bundledSamplePath(), 'utf8')
+        : await downloadText(url);
+    } catch (error) {
+      throw error instanceof DatasetError ? error : new Error(LOAD_FAILURE);
     }
 
     try {
       return parseCreators(text);
     } catch (error) {
       const reason = error instanceof Error ? error.message : '';
-      throw new Error(`${LOAD_FAILURE} ${reason}`.trim());
+      throw new Error(`${failure} ${reason}`.trim());
     }
   }
 }
