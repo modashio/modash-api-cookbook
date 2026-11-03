@@ -122,7 +122,7 @@ The [RAW API](https://www.modash.io/influencer-marketing-api/raw) is a **separat
 unfiltered data pulled from the platforms at the moment you ask, rather than Modash's analysis of
 it. Set `MODASH_RAW=true` to add its six tools; they are off by default, because an account
 without the product answers every one of them with `feature_not_available`, and six dead tools
-crowd out the fourteen that work.
+crowd out the sixteen that work.
 
 Three things about it are the opposite of Discovery, and all three change how you write the client:
 
@@ -258,6 +258,82 @@ replaced or dropped:
 
 ---
 
+## Query a CSV of creators you keep locally
+
+Two more tools read a CSV on your own machine instead of calling the API, so they spend no credits
+and need no token: `creator_lookup` and `creator_search`. Out of the box they serve a bundled,
+entirely synthetic sample of 25 invented creators, in
+[`data/creator_sample_synthetic.csv`](./data/creator_sample_synthetic.csv), so you can try them in
+mock mode. Every result says which dataset it came from (`bundled synthetic sample` or `custom`).
+
+To use your own data, pick one of two sources. If both are set, the file wins; if neither is set,
+the bundled sample is served.
+
+**A local file.** Put the CSV anywhere and point the server at it:
+
+```bash
+CREATOR_DATASET_PATH=/path/to/your/creators.csv npm run dev
+```
+
+**An https URL.** Set `CREATOR_DATASET_URL` to a link to the same CSV, for example a presigned
+download link:
+
+```bash
+CREATOR_DATASET_URL='https://…' npm run dev
+```
+
+The URL must be `https`; `http` and every other scheme are refused. It is downloaded once, on the
+first tool call, and kept in memory for the life of the process, so later calls never touch the
+network. The download times out after 30 seconds, is refused above 50 MB, and does not follow
+redirects.
+
+Claude Desktop asks for either in the install dialog (the optional "Creator dataset CSV" and
+"Creator dataset URL" settings, the second stored as a secret); Claude Code and Cursor read
+`CREATOR_DATASET_PATH` and `CREATOR_DATASET_URL` from your shell. A file is read lazily on the first
+call, parsed once and kept in memory. Neither the path nor the URL is ever printed, returned or
+logged, and a source that is missing, unreachable or malformed fails with a message that does not
+repeat it. Keep your own file out of git: the repository ignores `creator_10m_followers_sep26.csv`
+and `data/*.private.csv`, but a file you name differently is your responsibility.
+
+**A presigned link is a bearer credential.** Anyone holding it can download the file until it
+expires, because the signature sits in the query string. Keep it in the environment variable or the
+install setting, never in a chat with the model, an issue, a commit or a `.env` file you might
+share. Prefer a short expiry.
+
+| Tool | Input | Returns |
+| --- | --- | --- |
+| `creator_lookup` | `query`: a handle (with or without `@`) or part of a name | At most 5 rows. Exact handle first, then names containing the query, case-insensitive |
+| `creator_search` | `filters`: any of `country`, `audience_country`, `platform`, `min_followers`, `has_email`, `min_platforms`, plus `sort_by` and `limit` | At most 5 rows, sorted descending. A call with none of the six filters is rejected |
+
+`country` matches the creator's country name or code. `audience_country` matches the audience's top
+country name or code. `platform` (`instagram`, `tiktok`, `youtube`) keeps creators with an account
+there, `min_followers` applies to `max_followers`, and `sort_by` is one of `max_followers` (the
+default), `total_views_sep26`, `total_likes_sep26` or `total_posts_sep26`.
+
+These tools are built for **one creator at a time**. A call never returns more than 5 rows, there is
+no export, offset or paging parameter, and the tool descriptions tell the model to answer about a
+single creator and to use `creator_lookup` whenever the user names one. That is the intended demo:
+ask "how did this creator do in September?", not "list every creator in Brazil".
+
+Each result carries a `note`: the `_sep26` columns sum posts dated in September 2026 and are lower
+bounds, and `has_email` means Modash holds an email for the creator, not that the address is in the
+file.
+
+The CSV needs these columns, in any order. An empty cell means no data or no account on that
+platform; `audience_top_country_share` is a 0 to 1 fraction.
+
+`creator_id`, `name`, `n_platforms`, `anchor_platform`, `max_followers`, `has_email`,
+`creator_country`, `creator_country_code`, `creator_city`, `creator_location_source`,
+`creator_location_multi_country`, `audience_platform`, `audience_report_date`,
+`audience_top_country`, `audience_top_country_code`, `audience_top_country_share`,
+`audience_top3_countries` (like `US:41%|BR:12%|IN:9%`), `audience_top_city`, and for each of
+`ig`, `tt`, `yt`: `<p>_handle`, `<p>_url`, `<p>_followers`. Then the September 2026 counts, each as
+`_posts_`, `_views_`, `_likes_`, `_comments_` followed by `sep26`: `ig_feed`, `ig_reels`, `ig`, `tt`,
+`yt_long`, `yt_shorts`, `yt` and `total` (for example `ig_reels_views_sep26`). Last come
+`sep26_last_collected_date` and `extra_accounts_dropped`.
+
+---
+
 ## Running it
 
 ```bash
@@ -284,6 +360,8 @@ you have not filled in yet cannot start spending or start failing on a placehold
 | `MODASH_CREDIT_BUDGET` | `5` | Hard ceiling on credits for this process |
 | `MODASH_RAW` | `false` | Expose the RAW API tools. Separate product; see below |
 | `MODASH_RAW_BUDGET` | `50` | Hard ceiling on RAW *requests* for this process |
+| `CREATOR_DATASET_PATH` | bundled synthetic sample | CSV file read by `creator_lookup` and `creator_search`. Wins over the URL. See [above](#query-a-csv-of-creators-you-keep-locally) |
+| `CREATOR_DATASET_URL` | — | https link to the same CSV, downloaded once. Treat it as a secret |
 | `PORT` | `3000` | Streamable HTTP port. Ignored on stdio |
 | `MODASH_HTTP_HOST` | `127.0.0.1` | Interface the HTTP transport binds to. Widen it only deliberately |
 
@@ -533,7 +611,7 @@ two commands.
 ### Testing
 
 ```bash
-npm test        # 117 tests, mock mode, no token, no network
+npm test        # 157 tests, mock mode, no token, no network
 npm run typecheck
 npm run build
 ```

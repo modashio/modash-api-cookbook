@@ -68,6 +68,8 @@ describe('server surface', () => {
     const names = tools.map((tool) => tool.name).sort();
 
     assert.deepEqual(names, [
+      'creator_lookup',
+      'creator_search',
       'modash_ai_search_creators',
       'modash_brand_crossover',
       'modash_compare_audience_overlap',

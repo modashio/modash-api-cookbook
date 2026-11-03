@@ -117,6 +117,8 @@ describe('Claude Desktop bundle', () => {
   it('lists every tool the server can register, including the optional RAW ones', () => {
     const declared = mcpbManifest['tools'].map((tool: { name: string }) => tool.name).sort();
     const registered = [
+      'creator_lookup',
+      'creator_search',
       'modash_ai_search_creators',
       'modash_brand_crossover',
       'modash_compare_audience_overlap',
@@ -141,10 +143,31 @@ describe('Claude Desktop bundle', () => {
     assert.deepEqual(declared, registered);
   });
 
+  it('offers the dataset URL as an optional secret passed through as CREATOR_DATASET_URL', () => {
+    const setting = mcpbManifest['user_config'].creator_dataset_url;
+    assert.equal(setting.type, 'string');
+    assert.equal(setting.sensitive, true, 'a presigned link is a credential');
+    assert.notEqual(setting.required, true);
+    assert.equal(
+      mcpbManifest['server'].mcp_config.env.CREATOR_DATASET_URL,
+      '${user_config.creator_dataset_url}',
+    );
+  });
+
   it('offers RAW as an opt-in, defaulting off', () => {
     const enableRaw = mcpbManifest['user_config'].enable_raw;
     assert.equal(enableRaw.type, 'boolean');
     assert.equal(enableRaw.default, false);
+  });
+
+  it('offers a creator dataset file as an optional setting passed through as CREATOR_DATASET_PATH', () => {
+    const setting = mcpbManifest['user_config'].creator_dataset_path;
+    assert.equal(setting.type, 'file');
+    assert.notEqual(setting.required, true);
+    assert.equal(
+      mcpbManifest['server'].mcp_config.env.CREATOR_DATASET_PATH,
+      '${user_config.creator_dataset_path}',
+    );
   });
 });
 

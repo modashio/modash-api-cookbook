@@ -1,4 +1,5 @@
 import type { Config } from '../config.js';
+import { CreatorDataset } from '../creators/dataset.js';
 import { CreditLedger, RawRequestLedger } from '../server/modash/budget.js';
 import { ModashClient } from '../server/modash/client.js';
 import { MockTransport } from '../server/modash/mock.js';
@@ -11,6 +12,7 @@ export interface ToolContext {
   mock: boolean;
   /** Whether to register the RAW API tools. RAW is a separate product from Discovery. */
   raw: boolean;
+  creators: CreatorDataset;
 }
 
 /**
@@ -34,5 +36,6 @@ export function createToolContext(config: Config): ToolContext {
     rawLedger,
     mock: config.mock,
     raw: config.raw,
+    creators: new CreatorDataset({ path: config.creatorDatasetPath, url: config.creatorDatasetUrl }),
   };
 }

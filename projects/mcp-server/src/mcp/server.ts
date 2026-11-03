@@ -6,6 +6,7 @@ import { CREDITS, SEARCH_RESULTS_PER_PAGE } from '../server/modash/pricing.js';
 import type { ToolContext } from './context.js';
 import { registerAccountTools } from './tools/account.js';
 import { registerCollaborationTools } from './tools/collaborations.js';
+import { registerCreatorTools } from './tools/creators.js';
 import { registerCrossoverTools } from './tools/crossover.js';
 import { registerDiscoveryTools } from './tools/discovery.js';
 import { registerRawTools } from './tools/raw.js';
@@ -36,6 +37,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
   registerReportTools(server, ctx);
   registerCollaborationTools(server, ctx);
   registerCrossoverTools(server, ctx);
+  registerCreatorTools(server, ctx);
 
   // The RAW API is sold separately from Discovery, so its tools stay out of the list unless the
   // reader says they have it. Six more tools help nobody whose plan answers every one of them
@@ -70,6 +72,8 @@ function registerResources(server: McpServer, ctx: ToolContext): void {
                 'modash_lookup_dictionary',
                 'modash_lookup_ai_dictionary',
                 'modash_plan_brand_crossover',
+                'creator_lookup',
+                'creator_search',
               ],
               paid: {
                 modash_search_creators: `${CREDITS.searchPerResult} per result, ${SEARCH_RESULTS_PER_PAGE} results per page (page size is fixed)`,

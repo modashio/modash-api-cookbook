@@ -55,6 +55,7 @@ if (disagreements.length > 0) {
 
 rmSync(outputDir, { recursive: true, force: true });
 mkdirSync(join(outputDir, 'server'), { recursive: true });
+mkdirSync(join(outputDir, 'data'), { recursive: true });
 
 await esbuild.build({
   entryPoints: [join(projectRoot, 'src', 'stdio.ts')],
@@ -79,6 +80,10 @@ await esbuild.build({
 });
 
 copyFileSync(manifestPath, join(outputDir, 'manifest.json'));
+copyFileSync(
+  join(projectRoot, 'data', 'creator_sample_synthetic.csv'),
+  join(outputDir, 'data', 'creator_sample_synthetic.csv'),
+);
 copyFileSync(join(projectRoot, '..', '..', 'LICENSE'), join(outputDir, 'LICENSE'));
 
 // `mcpb` is a pinned devDependency rather than an `npx --yes` download, so the schema the manifest
