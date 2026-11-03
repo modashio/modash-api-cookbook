@@ -117,6 +117,8 @@ describe('Claude Desktop bundle', () => {
   it('lists every tool the server can register, including the optional RAW ones', () => {
     const declared = mcpbManifest['tools'].map((tool: { name: string }) => tool.name).sort();
     const registered = [
+      'creator_lookup',
+      'creator_search',
       'modash_ai_search_creators',
       'modash_brand_crossover',
       'modash_compare_audience_overlap',
@@ -145,6 +147,16 @@ describe('Claude Desktop bundle', () => {
     const enableRaw = mcpbManifest['user_config'].enable_raw;
     assert.equal(enableRaw.type, 'boolean');
     assert.equal(enableRaw.default, false);
+  });
+
+  it('offers a creator dataset file as an optional setting passed through as CREATOR_DATASET_PATH', () => {
+    const setting = mcpbManifest['user_config'].creator_dataset_path;
+    assert.equal(setting.type, 'file');
+    assert.notEqual(setting.required, true);
+    assert.equal(
+      mcpbManifest['server'].mcp_config.env.CREATOR_DATASET_PATH,
+      '${user_config.creator_dataset_path}',
+    );
   });
 });
 

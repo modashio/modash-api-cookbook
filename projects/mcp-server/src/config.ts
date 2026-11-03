@@ -21,6 +21,7 @@ const environmentSchema = z.object({
     .transform((value) => value === 'true')
     .optional(),
   MODASH_RAW_BUDGET: z.coerce.number().int().positive().default(50),
+  CREATOR_DATASET_PATH: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().default(3000),
   // Namespaced rather than plain `HOST`, so an unrelated variable already in the environment
   // cannot widen the binding by accident.
@@ -38,6 +39,7 @@ export interface Config {
   raw: boolean;
   /** Hard ceiling on RAW requests for the lifetime of this process. Counted in requests. */
   rawBudget: number;
+  creatorDatasetPath?: string | undefined;
   port: number;
   /** Loopback unless deliberately widened. The transport has no auth of its own. */
   httpHost: string;
@@ -79,6 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     MODASH_CREDIT_BUDGET,
     MODASH_RAW,
     MODASH_RAW_BUDGET,
+    CREATOR_DATASET_PATH,
     PORT,
     MODASH_HTTP_HOST,
   } = parsed.data;
@@ -101,6 +104,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     creditBudget: MODASH_CREDIT_BUDGET,
     raw: MODASH_RAW ?? false,
     rawBudget: MODASH_RAW_BUDGET,
+    creatorDatasetPath: CREATOR_DATASET_PATH,
     port: PORT,
     httpHost: MODASH_HTTP_HOST,
   };

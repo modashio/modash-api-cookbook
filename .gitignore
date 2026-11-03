@@ -19,3 +19,6 @@ npm-debug.log*
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+creator_10m_followers_sep26.csv
+**/data/*.private.csv

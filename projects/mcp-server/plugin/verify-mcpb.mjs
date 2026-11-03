@@ -109,6 +109,17 @@ try {
     `credit_budget did not reach the server: got ${account.structuredContent?.session.budget}`,
   );
 
+  const lookup = await client.callTool({
+    name: 'creator_lookup',
+    arguments: { query: 'synthetic_ig_02' },
+  });
+  check(lookup.isError !== true, `creator_lookup failed: ${JSON.stringify(lookup.content)}`);
+  check(
+    lookup.structuredContent?.dataset === 'bundled synthetic sample' &&
+      lookup.structuredContent?.rows[0]?.creator_id === 'syn_02',
+    'the bundle did not find its synthetic sample dataset',
+  );
+
   console.log(`Verified ${bundlePath}`);
   console.log(
     `  ${registered.length} tools, ${resources.length} resources, ${prompts.length} prompts`,
