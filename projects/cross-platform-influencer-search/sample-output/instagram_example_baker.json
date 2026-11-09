@@ -1,0 +1,30 @@
+{
+  "input": {
+    "platform": "instagram",
+    "handle": "example_baker"
+  },
+  "accounts": {
+    "instagram": {
+      "userId": "1000000001",
+      "username": "example_baker",
+      "followers": 100000,
+      "how": "input"
+    },
+    "tiktok": {
+      "userId": "7000000000000000001",
+      "username": "example_baker",
+      "followers": 200000,
+      "how": "confirmed both ways"
+    },
+    "youtube": {
+      "userId": "UCexampleBaker000000001",
+      "username": "ExampleBakerKitchen",
+      "followers": 50000,
+      "how": "confirmed both ways"
+    }
+  },
+  "candidates": [],
+  "missing": [],
+  "credits": 3,
+  "errors": []
+}

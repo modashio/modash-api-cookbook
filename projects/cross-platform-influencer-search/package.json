@@ -1,0 +1,26 @@
+{
+  "name": "modash-cross-platform-influencer-search",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cross-platform influencer search via API: find one creator's Instagram, TikTok and YouTube accounts with the Modash Discovery API, with the evidence for each link.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts --mock",
+    "match": "tsx src/cli.ts",
+    "typecheck": "tsgo --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "build": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "@typescript/native-preview": "^7.0.0-dev.20260707.2",
+    "tsx": "^4.20.6"
+  }
+}
