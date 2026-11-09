@@ -1,0 +1,35 @@
+{
+  "input": {
+    "platform": "instagram",
+    "handle": "example_techreviews"
+  },
+  "accounts": {
+    "instagram": {
+      "userId": "1000000002",
+      "username": "example_techreviews",
+      "followers": 5000000,
+      "how": "input",
+      "email_agrees": true
+    },
+    "youtube": {
+      "userId": "UCexampleTech0000000003",
+      "username": "exampletechreviewsold",
+      "followers": 20000000,
+      "how": "email (hello@example.com)"
+    }
+  },
+  "candidates": [
+    {
+      "platform": "tiktok",
+      "userId": "7000000000000000002",
+      "username": "example_techreviews",
+      "followers": 2000000,
+      "how": "same handle, unconfirmed"
+    }
+  ],
+  "missing": [
+    "tiktok"
+  ],
+  "credits": 2.02,
+  "errors": []
+}

@@ -1,0 +1,176 @@
+{
+  "GET instagram/users?query=example_baker": {
+    "error": false,
+    "users": [
+      {
+        "userId": "1000000001",
+        "username": "example_baker",
+        "fullname": "Example Baker",
+        "followers": 100000,
+        "isVerified": false
+      }
+    ]
+  },
+  "GET instagram/profile/1000000001/report": {
+    "error": false,
+    "profile": {
+      "userId": "1000000001",
+      "profile": {
+        "username": "example_baker",
+        "fullname": "Example Baker",
+        "followers": 100000,
+        "url": "https://www.instagram.com/example_baker"
+      },
+      "contacts": [
+        {
+          "type": "youtube",
+          "value": "https://www.youtube.com/channel/UCexampleBaker000000001"
+        },
+        {
+          "type": "tiktok",
+          "value": "https://www.tiktok.com/share/user/7000000000000000001"
+        }
+      ],
+      "_note": "a real report has many more fields under profile; this keeps the ones the project reads"
+    }
+  },
+  "GET tiktok/profile/7000000000000000001/report": {
+    "error": false,
+    "profile": {
+      "userId": "7000000000000000001",
+      "profile": {
+        "username": "example_baker",
+        "fullname": "Example Baker",
+        "followers": 200000,
+        "url": "https://www.tiktok.com/@example_baker"
+      },
+      "contacts": [
+        {
+          "type": "instagram",
+          "value": "https://www.instagram.com/example_baker/"
+        },
+        {
+          "type": "youtube",
+          "value": "https://www.youtube.com/c/ExampleBakerKitchen"
+        },
+        {
+          "type": "youtube",
+          "value": "https://www.youtube.com/channel/UCexampleOther000000002"
+        },
+        {
+          "type": "linktree",
+          "value": "https://linktr.ee/example_baker"
+        }
+      ],
+      "_note": "a real report has many more fields under profile; this keeps the ones the project reads"
+    }
+  },
+  "GET youtube/profile/UCexampleBaker000000001/report": {
+    "error": false,
+    "profile": {
+      "userId": "UCexampleBaker000000001",
+      "profile": {
+        "handle": "@ExampleBakerKitchen",
+        "fullname": "Example Baker",
+        "followers": 50000,
+        "url": "https://www.youtube.com/channel/UCexampleBaker000000001"
+      },
+      "contacts": [
+        {
+          "type": "instagram",
+          "value": "https://www.instagram.com/example_baker/"
+        }
+      ],
+      "_note": "a real report has many more fields under profile; this keeps the ones the project reads"
+    }
+  },
+  "GET instagram/users?query=example_techreviews": {
+    "error": false,
+    "users": [
+      {
+        "userId": "1000000002",
+        "username": "example_techreviews",
+        "fullname": "Example Tech Reviews",
+        "followers": 5000000,
+        "isVerified": true
+      }
+    ]
+  },
+  "GET instagram/profile/1000000002/report": {
+    "error": false,
+    "profile": {
+      "userId": "1000000002",
+      "profile": {
+        "username": "example_techreviews",
+        "fullname": "Example Tech Reviews",
+        "followers": 5000000,
+        "url": "https://www.instagram.com/example_techreviews"
+      },
+      "contacts": [
+        {
+          "type": "email",
+          "value": "hello@example.com"
+        }
+      ],
+      "_note": "a real report has many more fields under profile; this keeps the ones the project reads"
+    }
+  },
+  "POST email-search {\"emails\":[\"hello@example.com\"]}": {
+    "matchedEmails": [
+      {
+        "email": "hello@example.com",
+        "users": [
+          {
+            "platform": "instagram",
+            "userId": "1000000002",
+            "username": "example_techreviews",
+            "fullname": "Example Tech Reviews",
+            "followers": 5000000
+          },
+          {
+            "platform": "youtube",
+            "userId": "UCexampleTech0000000003",
+            "username": "exampletechreviewsold",
+            "fullname": "Example Tech Reviews",
+            "followers": 20000000
+          }
+        ]
+      }
+    ],
+    "totalMatches": 1,
+    "error": false
+  },
+  "GET tiktok/users?query=example_techreviews": {
+    "error": false,
+    "users": [
+      {
+        "userId": "7000000000000000002",
+        "username": "example_techreviews",
+        "fullname": "Example Tech Reviews",
+        "followers": 2000000,
+        "isVerified": true
+      },
+      {
+        "userId": "7000000000000000003",
+        "username": "example_techreviews_fan",
+        "fullname": "Example Tech Reviews Fan",
+        "followers": 10000,
+        "isVerified": false
+      }
+    ]
+  },
+  "GET tiktok/profile/7000000000000000002/report": {
+    "error": false,
+    "profile": {
+      "userId": "7000000000000000002",
+      "profile": {
+        "username": "example_techreviews",
+        "fullname": "Example Tech Reviews",
+        "followers": 2000000,
+        "url": "https://www.tiktok.com/@example_techreviews"
+      },
+      "contacts": [],
+      "_note": "a real report has many more fields under profile; this keeps the ones the project reads"
+    }
+  }
+}
