@@ -11,6 +11,12 @@ const HANDLE_OK: Record<Platform, RegExp> = {
   youtube: /^[\p{L}\p{N}_.-]{3,30}$/u,
 };
 
+const OWN_SITE: Record<Platform, RegExp> = {
+  instagram: /^(www\.|m\.)?instagram\.com$/i,
+  tiktok: /^(www\.|m\.)?tiktok\.com$/i,
+  youtube: /^(www\.|m\.)?youtube\.com$/i,
+};
+
 const NOT_A_PROFILE = new Set([
   'p', 'reel', 'reels', 'stories', 'explore', 'tv', 'watch', 'shorts', 'playlist', 'results',
   'channel', 'share', 'video', 'tag', 'music', 'discover', 'accounts', 'direct', '_u', 'about',
@@ -37,7 +43,7 @@ export function handleFrom(platform: Platform, value: string | null | undefined)
   let parts = path.split('/').filter(Boolean);
   if (parts.length === 0) return undefined;
 
-  const ownSite = new RegExp(`^(www\\.|m\\.)?${platform}\\.com$`, 'i');
+  const ownSite = OWN_SITE[platform];
   // A bare value like john.doe is a handle; anything with a scheme or a path after a dotted host is a URL.
   if (ownSite.test(parts[0]!) || hadScheme || (parts.length > 1 && parts[0]!.includes('.'))) {
     if (!ownSite.test(parts[0]!)) return undefined;
