@@ -202,7 +202,7 @@ describe('command line', () => {
   const lines: string[] = [];
   const print = (line: string) => lines.push(line);
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'cross-platform-search-'));
+    dir = mkdtempSync(join(tmpdir(), 'match-creator-'));
     lines.length = 0;
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));

@@ -59,7 +59,7 @@ jobs:
       matrix:
         project:
           - agentic-influencer-search
-          - cross-platform-influencer-search
+          - match-creator-across-platforms
           - mcp-server
     defaults:
       run:

@@ -1,8 +1,8 @@
 {
-  "name": "modash-cross-platform-influencer-search",
+  "name": "modash-match-creator-across-platforms",
   "version": "1.0.0",
   "private": true,
-  "description": "Cross-platform influencer search via API: find one creator's Instagram, TikTok and YouTube accounts with the Modash Discovery API, with the evidence for each link.",
+  "description": "Match one creator across Instagram, TikTok and YouTube: start from one handle and find the same person's accounts on the other platforms with the Modash Discovery API, with the evidence for each link.",
   "type": "module",
   "engines": {
     "node": ">=22"

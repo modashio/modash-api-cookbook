@@ -1,4 +1,4 @@
-# Cross-platform influencer search via API
+# Match one creator across Instagram, TikTok and YouTube
 
 Start with a creator's handle on one platform. Get the same person's accounts on the other two, with
 the evidence for each link, using the [Modash Discovery API](https://docs.modash.io).
@@ -9,6 +9,7 @@ credits per creator.
 ## Try it with no token
 
 ```bash
+cd projects/match-creator-across-platforms
 npm install
 npm run dev
 ```
@@ -286,7 +287,7 @@ a profile links on the same platform. For 10,000 creators that is roughly 10,000
 A saved report is free to read again.
 
 Calls run one after another, with a short pause to stay under the rate limit, so allow about 3 to 6
-seconds per creator: roughly half a day for 10,000.
+seconds per creator: roughly 8 to 17 hours for 10,000.
 
 Follower counts come from the report when the tool has one, because lookup and email search rows can
 be a little older.
