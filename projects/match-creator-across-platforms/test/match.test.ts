@@ -88,31 +88,21 @@ describe('errors and credits', () => {
     assert.equal(new ModashApiError('x', 404, 'account_not_found', '').isFatal, false);
   });
 
-  it('skips a linked account that is not found, with no error', async () => {
+  it('records a dead linked account and goes on', async () => {
     const saved = {
       ...amy,
       'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
         { type: 'tiktok', value: 'https://www.tiktok.com/share/user/9' },
       ]),
+      'GET tiktok/users?query=amy': { users: [] },
+      'GET youtube/users?query=amy': { users: [] },
     };
     const c = client(fake(saved));
     const r = await new Matcher(c).match('instagram', 'amy');
     assert.deepEqual(r.missing, ['tiktok', 'youtube']);
-    assert.deepEqual(r.errors, []);
-    assert.equal(c.spent, 1);
-  });
-
-  it('records a linked report that fails another way and goes on', async () => {
-    const saved = {
-      ...amy,
-      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
-        { type: 'tiktok', value: 'https://www.tiktok.com/share/user/9' },
-      ]),
-    };
-    const t = fake(saved, { 'GET tiktok/profile/9/report': [403, 'feature_not_available'] });
-    const r = await new Matcher(client(t)).match('instagram', 'amy');
     assert.equal(r.errors.length, 1);
     assert.match(r.errors[0]!, /report tiktok 9/);
+    assert.equal(c.spent, 1);
   });
 
   it('stops on a bad token', async () => {
@@ -315,6 +305,27 @@ describe('matching', () => {
     const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
     assert.equal(r.accounts.youtube, undefined);
     assert.equal(r.accounts.instagram?.email_agrees, undefined);
+    assert.deepEqual(r.candidates.map((c) => c.userId), ['UCbea']);
+  });
+
+  it('counts the starting account as listing its email when the search leaves it out', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
+      'POST email-search {"emails":["team@example.com"]}': {
+        matchedEmails: [
+          {
+            email: 'team@example.com',
+            users: [
+              { platform: 'instagram', userId: '2', username: 'bea' },
+              { platform: 'youtube', userId: 'UCbea', username: 'bea' },
+            ],
+          },
+        ],
+      },
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.youtube, undefined);
     assert.deepEqual(r.candidates.map((c) => c.userId), ['UCbea']);
   });
 

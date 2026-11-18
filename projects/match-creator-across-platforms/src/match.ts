@@ -1,15 +1,10 @@
 import { groupBy, partition, remove, uniqBy } from 'lodash-es';
 
 import { emailsIn, handleFrom, idFrom, isPlatform, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
+import { getReport, lookupUsers, searchEmails } from './modash/api.js';
 import type { ModashClient } from './modash/client.js';
 import { CreditBudgetExceededError, ModashApiError } from './modash/errors.js';
-import {
-  emailSearchResponseSchema,
-  type ReportProfile,
-  reportResponseSchema,
-  type UserRow,
-  usersResponseSchema,
-} from './modash/responses.js';
+import type { ReportProfile, UserRow } from './modash/responses.js';
 import { round2 } from './numbers.js';
 
 export interface Account {
@@ -57,9 +52,6 @@ function describe(error: unknown): string {
   return typeof code === 'string' ? `${error.message} (${code})` : error.message;
 }
 
-const REPORT_COST = 1;
-const EMAIL_MATCH_COST = 0.02;
-
 export class Matcher {
   #errors: string[] = [];
   /** Reports asked for while matching one creator (null when the call failed), so none is paid for twice. */
@@ -72,10 +64,7 @@ export class Matcher {
 
   /** The lookup can return more than one account; keep the exact handle, and a current handle over an older name. */
   async lookup(platform: Platform, handle: string): Promise<Found | undefined> {
-    const data = await this.client.call(
-      { method: 'GET', path: `${platform}/users`, query: { query: handle, limit: '10' } },
-      usersResponseSchema,
-    );
+    const data = await lookupUsers(this.client, platform, handle);
     const wanted = handle.toLowerCase();
     const rows = (data.users ?? []).filter((row): row is Found => !!row.userId);
     return (
@@ -86,20 +75,9 @@ export class Matcher {
   async report(platform: Platform, userId: string): Promise<ReportProfile> {
     const cached = this.cache?.get(platform, userId);
     if (cached) return cached;
-    const data = await this.client.call(
-      { method: 'GET', path: `${platform}/profile/${encodeURIComponent(userId)}/report` },
-      reportResponseSchema,
-      { max: REPORT_COST },
-    );
+    const data = await getReport(this.client, platform, userId);
     this.cache?.set(platform, userId, data.profile);
     return data.profile;
-  }
-
-  async emailSearch(emails: string[]) {
-    return this.client.call({ method: 'POST', path: 'email-search', body: { emails } }, emailSearchResponseSchema, {
-      max: EMAIL_MATCH_COST * emails.length,
-      actual: (d) => EMAIL_MATCH_COST * Math.min((d.matchedEmails ?? []).length, emails.length),
-    });
   }
 
   async #safe<T>(what: string, step: () => Promise<T>): Promise<T | undefined> {
@@ -108,8 +86,6 @@ export class Matcher {
     } catch (error) {
       if (error instanceof CreditBudgetExceededError) throw error;
       if (error instanceof ModashApiError && error.isFatal) throw error;
-      // Not found is an answer, not a failure: a rerun would get the same answer.
-      if (error instanceof ModashApiError && error.code === 'account_not_found') return undefined;
       this.#errors.push(`${what}: ${describe(error)}`);
       return undefined;
     }
@@ -221,7 +197,7 @@ export class Matcher {
     const { accounts } = result;
     const missing = PLATFORMS.filter((p) => !accounts[p]);
     if (missing.length === 0 || start.emails.size === 0) return;
-    const data = await this.#safe('email search', () => this.emailSearch([...start.emails].sort()));
+    const data = await this.#safe('email search', () => searchEmails(this.client, [...start.emails].sort()));
 
     const rows = uniqBy(
       (data?.matchedEmails ?? []).flatMap(({ email, users }) =>
@@ -233,9 +209,16 @@ export class Matcher {
       ),
       (row) => `${row.email}:${row.platform}:${row.userId}`,
     );
+    // Email search may leave out accounts that list the address, so count the ones already found too.
+    const listedByFound = PLATFORMS.flatMap((p) => {
+      const account = accounts[p];
+      const report = account && this.#reports.get(`${p}:${account.userId}`);
+      return report ? [...emailsIn(report)].map((email) => ({ email, platform: p, userId: account.userId })) : [];
+    });
     // An address that two accounts on one platform list belongs to more than one person, so it proves nothing.
+    const listings = uniqBy([...rows, ...listedByFound], (row) => `${row.email}:${row.platform}:${row.userId}`);
     const sharedEmails = new Set(
-      Object.entries(groupBy(rows, 'email'))
+      Object.entries(groupBy(listings, 'email'))
         .filter(([, emailRows]) => Object.values(groupBy(emailRows, 'platform')).some((group) => group.length > 1))
         .map(([email]) => email),
     );

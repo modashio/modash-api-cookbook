@@ -61,7 +61,7 @@ npm run match -- --csv handles.csv --max-credits 500
 - **Results** go to `output/results.jsonl`, one line per creator.
 - **Resume.** If a CSV run stops, run the same command again. Creators already finished, including ones not found on their starting platform, are skipped; creators that hit an error are tried again. A single-creator run replaces that creator's line and leaves the rest alone.
 - **Saved reports.** Every report is saved in `output/reports/`, so a rerun never pays for the same report twice. They do not expire: delete the folder to pull fresh data. The reports hold creators' contact emails, so do not commit, share or screen-record this folder.
-- **Errors.** An invalid token (`api_token_invalid`) or an empty balance (`not_enough_credits`) stops the run with the API's message. A call that answers `account_not_found` is not an error: that account is skipped. Any other failed call is written to that creator's `errors` and the run goes on.
+- **Errors.** An invalid token (`api_token_invalid`) or an empty balance (`not_enough_credits`) stops the run with the API's message. Any other failed call, such as a report for an account that no longer exists, is written to that creator's `errors` and the run goes on.
 
 `npm test` runs the tests offline, with no token and no network.
 
@@ -98,6 +98,7 @@ The kinds of evidence, strongest first:
 `accounts` holds only matches with evidence from both sides. `candidates` holds the rest. Besides the
 two rows above, a candidate's `how` can end in `, second link` (a second account on the same platform
 that also links back), `, shared by several accounts` (an email listed by more than one account on a
+platform), `, another email names a different account` (two emails point at two accounts on one
 platform), or read `same handle, report failed`.
 `email_agrees: true` on an account means email search found it too, a second piece of evidence.
 
@@ -107,10 +108,10 @@ platform), or read `same handle, report failed`.
 | --- | --- | --- |
 | `GET /v1/{platform}/users?query=<handle>&limit=10` | Searches the list of influencers for the query string. Returns up to `limit` accounts, with Modash's id for each | Free |
 | `GET /v1/{platform}/profile/{userId}/report` | The creator's full profile. This tool reads `profile.contacts` | 1 credit |
-| `POST /v1/email-search` with `{"emails": [...]}` | Every Instagram, TikTok and YouTube account that lists one of those emails | 0.02 credits per email that matches |
+| `POST /v1/email-search` with `{"emails": [...]}` | Instagram, TikTok and YouTube accounts that list one of those emails | 0.02 credits per email that matches |
 
 `{platform}` is `instagram`, `tiktok` or `youtube`. Every call takes the header
-`Authorization: Bearer <your token>`. All of them live in [`src/match.ts`](./src/match.ts), and every
+`Authorization: Bearer <your token>`. All of them, with their costs, live in [`src/modash/api.ts`](./src/modash/api.ts), and every
 request goes through [`src/modash/client.ts`](./src/modash/client.ts), which holds the budget, retries
 and error handling.
 
@@ -223,8 +224,8 @@ than 3 credits.
 
 If a platform is still missing, take the `email` contacts from the starting report and from accounts
 confirmed both ways, and send them to email search. Emails on an account that did not link back are
-not used, because that account may belong to someone else. Email search returns every account on the
-three platforms that lists one of the emails. The account needs at least
+not used, because that account may belong to someone else. Email search returns accounts on the
+three platforms that list one of the emails. The account needs at least
 0.02 credits per email sent, or the call returns `not_enough_credits`.
 
 `example_techreviews` lists no other account on Instagram, only an email:
@@ -300,7 +301,7 @@ Follower counts come from the report when the tool has one.
 - **HTTP 429 or a server error.** The tool waits 3, 6, 9 then 12 seconds and tries again. If the call still fails, it goes into that creator's `errors` and a rerun tries again.
 - **A report that is not ready.** A report answers 503 `retry_later` when the account's audience is not ready yet. The API asks for a retry in a few hours and does not charge for it, so the tool does not wait: the error goes into that creator's `errors` and a later rerun tries again.
 - **A timeout or a dropped connection.** A free call is tried again. A paid call is not, because the API may have finished it and sending it again could bill it twice. It goes into that creator's `errors`, its cost stays counted against the budget, and a rerun tries again.
-- **A linked account that no longer exists.** When its report answers `account_not_found`, the tool skips it and the platform stays `missing`. Any other error goes into `errors`.
+- **A linked account that no longer exists.** Its report fails. The error goes into `errors`, the platform stays `missing`, and a rerun asks again. Remove the creator from the CSV to stop retrying it.
 - **Shared agency emails.** Several creators can list the same management address. The tool only accepts an email match when one account per platform lists it, but an agency address can still join two people. Accept email matches only where the address is the creator's own, or require a second signal.
 - **Handles change.** A link to `instagram.com/oldname` points at a renamed account. The lookup then misses, and the platform stays `missing`.
 - **Short links.** `vm.tiktok.com/...`, `youtu.be/...` and `instagr.am/...` do not carry a handle or an id, so the tool skips them without an error.
