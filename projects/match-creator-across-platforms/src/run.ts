@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { uniqBy } from 'lodash-es';
+import { sortBy, uniqBy } from 'lodash-es';
 
 import { loadConfig } from './config.js';
 import { handleFrom, isPlatform, PLATFORMS, type Platform } from './contacts.js';
@@ -97,7 +97,8 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   if (mock && existsSync(resultsFile)) {
     unlinkSync(resultsFile);
   } else if (values.csv !== undefined && existsSync(resultsFile)) {
-    for (const key of keepFinished(resultsFile)) done.add(key);
+    const toRun = new Set(todo.flatMap(([p, h]) => creatorKeyOf(p, h) ?? []));
+    for (const key of keepFinished(resultsFile, toRun)) done.add(key);
   }
 
   let ran = 0;
@@ -110,7 +111,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
       print(`row ${index + 1} skipped: ${(error as Error).message}`);
       continue;
     }
-    const key = `${platform}:${handle.toLowerCase()}`;
+    const key = creatorKey(platform, handle);
     if (done.has(key)) continue;
     done.add(key);
 
@@ -145,17 +146,31 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   return 0;
 }
 
-/** Rewrites a results file to the first good result per creator, and returns the creators it kept. */
-export function keepFinished(resultsFile: string): string[] {
+const creatorKey = (platform: Platform, handle: string) => `${platform}:${handle.toLowerCase()}`;
+
+function creatorKeyOf(platform: string | undefined, handle: string | undefined): string | undefined {
+  try {
+    return creatorKey(...cleanInput(platform, handle));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Rewrites a results file to one result per creator, the first good one when there is one. Failed results
+ * of creators about to run again are dropped; other creators' lines stay. Returns the finished creators.
+ */
+export function keepFinished(resultsFile: string, toRun: Set<string>): string[] {
+  const rows = readResults(resultsFile).filter((r) => !(r.failed && toRun.has(r.key)));
   const kept = uniqBy(
-    readResults(resultsFile).filter((r) => !r.failed),
+    sortBy(rows, (r) => r.failed),
     'key',
   );
   writeLines(
     resultsFile,
     kept.map((r) => r.line),
   );
-  return kept.map((r) => r.key);
+  return kept.filter((r) => !r.failed).map((r) => r.key);
 }
 
 export function cleanInput(platform: string | undefined, handle: string | undefined): [Platform, string] {

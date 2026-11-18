@@ -116,6 +116,7 @@ export class Matcher {
       if (start) {
         await this.#followProfileLinks(start, result);
         await this.#matchByEmail(start, result);
+        this.#markEmailAgreement(start, result);
         await this.#trySameHandle(start, result);
       }
     } catch (error) {
@@ -209,12 +210,8 @@ export class Matcher {
       ),
       (row) => `${row.email}:${row.platform}:${row.userId}`,
     );
-    // Email search may leave out accounts that list the address, so count the ones already found too.
-    const listedByFound = PLATFORMS.flatMap((p) => {
-      const account = accounts[p];
-      const report = account && this.#reports.get(`${p}:${account.userId}`);
-      return report ? [...emailsIn(report)].map((email) => ({ email, platform: p, userId: account.userId })) : [];
-    });
+    // The spec does not promise that email search returns every account listing an address, so count the ones already found too.
+    const listedByFound = this.#emailsOfFound(accounts);
     // An address that two accounts on one platform list belongs to more than one person, so it proves nothing.
     const listings = uniqBy([...rows, ...listedByFound], (row) => `${row.email}:${row.platform}:${row.userId}`);
     const sharedEmails = new Set(
@@ -224,11 +221,6 @@ export class Matcher {
     );
     for (const email of sharedEmails) start.emails.delete(email);
     const [sharedRows, ownRows] = partition(rows, (row) => sharedEmails.has(row.email));
-
-    for (const row of ownRows) {
-      const account = accounts[row.platform];
-      if (account?.userId === row.userId) account.email_agrees = true;
-    }
     const byPlatform = groupBy(
       ownRows.filter((row) => missing.includes(row.platform)),
       'platform',
@@ -247,6 +239,24 @@ export class Matcher {
     for (const { email, ...row } of sharedRows.filter((r) => !accounts[r.platform])) {
       this.#suggest(result, { ...row, how: `email (${email}), shared by several accounts` });
     }
+  }
+
+  /** An email that matched accounts on two platforms both list is a second piece of evidence for both. */
+  #markEmailAgreement(start: Start, { accounts }: MatchResult): void {
+    const listings = this.#emailsOfFound(accounts).filter((row) => start.emails.has(row.email));
+    for (const group of Object.values(groupBy(listings, 'email'))) {
+      if (uniqBy(group, 'platform').length < 2) continue;
+      for (const { platform } of group) accounts[platform]!.email_agrees = true;
+    }
+  }
+
+  /** The emails each matched account lists, for the accounts whose report the tool holds. */
+  #emailsOfFound(accounts: MatchResult['accounts']): { email: string; platform: Platform; userId: string }[] {
+    return PLATFORMS.flatMap((platform) => {
+      const account = accounts[platform];
+      const report = account && this.#reports.get(`${platform}:${account.userId}`);
+      return report ? [...emailsIn(report)].map((email) => ({ email, platform, userId: account.userId })) : [];
+    });
   }
 
   /** Step 5: an account with one of the start's names is a guess until its own report confirms it. */

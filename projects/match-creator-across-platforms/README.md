@@ -24,7 +24,7 @@ instagram @example_baker  (3 credits on a live run)
   youtube    @ExampleBakerKitchen               50000  confirmed both ways
 
 instagram @example_techreviews  (2.02 credits on a live run)
-  instagram  @example_techreviews             5000000  input  + email agrees
+  instagram  @example_techreviews             5000000  input
   tiktok     not found
   youtube    @exampletechreviewsold          20000000  email (hello@example.com)
   candidate  tiktok @example_techreviews 2000000  same handle, unconfirmed
@@ -100,7 +100,8 @@ two rows above, a candidate's `how` can end in `, second link` (a second account
 that also links back), `, shared by several accounts` (an email listed by more than one account on a
 platform), `, another email names a different account` (two emails point at two accounts on one
 platform), or read `same handle, report failed`.
-`email_agrees: true` on an account means email search found it too, a second piece of evidence.
+`email_agrees: true` on two matched accounts means both list the same email, a second piece of evidence.
+It is set only on accounts whose report the tool holds, so never on an account found by email alone.
 
 ## The endpoints
 
@@ -253,11 +254,11 @@ curl -X POST "https://api.modash.io/v1/email-search" \
 }
 ```
 
-The tool compares ids, not names. When the search also returns the account you started from, the tool marks it
-`email_agrees: true`. When several accounts on one platform share the address, none is accepted and
-all go to `candidates`, and step 5 does not count that address as evidence. This includes the starting
-platform: an address that a second Instagram account also lists belongs to an agency, not to the
-creator. When two emails name two different accounts on one platform, both go to `candidates`.
+The tool compares ids, not names. When two accounts on one platform list the address, none is accepted,
+the accounts on missing platforms go to `candidates`, and step 5 does not count that address as
+evidence. The starting platform counts too: an address that a second Instagram account also lists
+belongs to an agency, not to the creator. When two emails name two different accounts on one
+platform, both go to `candidates`.
 
 ## Step 5: treat the same handle as a guess
 

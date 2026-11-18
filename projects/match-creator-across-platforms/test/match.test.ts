@@ -329,6 +329,30 @@ describe('matching', () => {
     assert.deepEqual(r.candidates.map((c) => c.userId), ['UCbea']);
   });
 
+  it('marks email agreement only when two matched accounts list the same email', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
+        { type: 'email', value: 'a@example.com' },
+        { type: 'tiktok', value: 'https://www.tiktok.com/share/user/8' },
+        { type: 'youtube', value: 'https://www.youtube.com/@amy' },
+      ]),
+      'GET tiktok/profile/8/report': report('8', { username: 'amy' }, [
+        { type: 'email', value: 'a@example.com' },
+        { type: 'instagram', value: 'https://www.instagram.com/amy' },
+      ]),
+      'GET youtube/users?query=amy': { users: [{ userId: 'UC9', handle: '@amy' }] },
+      'GET youtube/profile/UC9/report': report('UC9', { handle: '@amy' }, [
+        { type: 'email', value: 'b@example.com' },
+        { type: 'instagram', value: 'https://www.instagram.com/amy' },
+      ]),
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.instagram?.email_agrees, true);
+    assert.equal(r.accounts.tiktok?.email_agrees, true);
+    assert.equal(r.accounts.youtube?.email_agrees, undefined);
+  });
+
   it('lists both accounts when two emails name different accounts on one platform', async () => {
     const saved = {
       ...amy,
@@ -559,8 +583,17 @@ describe('command line', () => {
     const line = (handle: string, errors: string[], credits: number) =>
       JSON.stringify({ input: { platform: 'instagram', handle }, accounts: {}, candidates: [], missing: [], credits, errors });
     writeFileSync(file, [line('amy', [], 1), line('bea', ['report failed'], 0), line('Amy', [], 2), '{"cut off'].join('\n'));
-    assert.deepEqual(keepFinished(file), ['instagram:amy']);
+    assert.deepEqual(keepFinished(file, new Set(['instagram:amy', 'instagram:bea'])), ['instagram:amy']);
     assert.equal(readFileSync(file, 'utf8'), `${line('amy', [], 1)}\n`);
+  });
+
+  it('keeps the failed result of a creator who is not in this run', () => {
+    const file = join(dir, 'results.jsonl');
+    const line = (handle: string, errors: string[]) =>
+      JSON.stringify({ input: { platform: 'instagram', handle }, accounts: {}, candidates: [], missing: [], credits: 0, errors });
+    writeFileSync(file, [line('amy', []), line('bea', ['report failed'])].join('\n'));
+    assert.deepEqual(keepFinished(file, new Set(['instagram:amy'])), ['instagram:amy']);
+    assert.equal(readFileSync(file, 'utf8'), `${line('amy', [])}\n${line('bea', ['report failed'])}\n`);
   });
 
   it('refuses a CSV with a quote that never closes', () => {

@@ -2,8 +2,8 @@ import type { Platform } from '../contacts.js';
 import type { ModashClient } from './client.js';
 import { emailSearchResponseSchema, reportResponseSchema, usersResponseSchema } from './responses.js';
 
-export const REPORT_COST = 1;
-export const EMAIL_MATCH_COST = 0.02;
+const REPORT_COST = 1;
+const EMAIL_MATCH_COST = 0.02;
 
 /** Free. Searches the list of influencers for the query string. */
 export const lookupUsers = (client: ModashClient, platform: Platform, query: string) =>
