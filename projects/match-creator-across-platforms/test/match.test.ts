@@ -353,6 +353,35 @@ describe('matching', () => {
     assert.equal(r.accounts.youtube?.email_agrees, undefined);
   });
 
+  it('does not accept an email that someone else lists on a platform already matched', async () => {
+    const uc = `UC${'a'.repeat(22)}`;
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
+        { type: 'email', value: 'team@example.com' },
+        { type: 'youtube', value: `https://www.youtube.com/channel/${uc}` },
+      ]),
+      [`GET youtube/profile/${uc}/report`]: report(uc, { handle: '@amy' }, [
+        { type: 'instagram', value: 'https://www.instagram.com/amy' },
+      ]),
+      'POST email-search {"emails":["team@example.com"]}': {
+        matchedEmails: [
+          {
+            email: 'team@example.com',
+            users: [
+              { platform: 'youtube', userId: 'UCbea', username: 'bea' },
+              { platform: 'tiktok', userId: '77', username: 'cat' },
+            ],
+          },
+        ],
+      },
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.youtube?.userId, uc);
+    assert.equal(r.accounts.tiktok, undefined);
+    assert.deepEqual(r.candidates.map((c) => c.userId), ['77']);
+  });
+
   it('lists both accounts when two emails name different accounts on one platform', async () => {
     const saved = {
       ...amy,

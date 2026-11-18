@@ -1,4 +1,4 @@
-import { groupBy, partition, remove, uniqBy } from 'lodash-es';
+import { groupBy, partition, remove, uniq, uniqBy } from 'lodash-es';
 
 import { emailsIn, handleFrom, idFrom, isPlatform, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
 import { getReport, lookupUsers, searchEmails } from './modash/api.js';
@@ -215,11 +215,18 @@ export class Matcher {
     );
     // The spec does not promise that email search returns every account listing an address, so count the ones already found too.
     const listedByFound = this.#emailsOfFound(accounts);
-    // An address that two accounts on one platform list belongs to more than one person, so it proves nothing.
     const listings = uniqBy([...rows, ...listedByFound], (row) => `${row.email}:${row.platform}:${row.userId}`);
+    // An address belongs to more than one person when two accounts on one platform list it, or when an account
+    // other than the creator's lists it on a platform where the creator is already matched. Then it proves nothing.
+    const listedByOthers = (emailRows: typeof listings) =>
+      Object.entries(groupBy(emailRows, 'platform')).some(([platform, group]) => {
+        const listers = uniq(group.map((row) => row.userId));
+        const matched = isPlatform(platform) ? accounts[platform]?.userId : undefined;
+        return listers.length > 1 || (matched !== undefined && listers[0] !== matched);
+      });
     const sharedEmails = new Set(
       Object.entries(groupBy(listings, 'email'))
-        .filter(([, emailRows]) => Object.values(groupBy(emailRows, 'platform')).some((group) => group.length > 1))
+        .filter(([, emailRows]) => listedByOthers(emailRows))
         .map(([email]) => email),
     );
     for (const email of sharedEmails) start.emails.delete(email);

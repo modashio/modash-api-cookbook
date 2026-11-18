@@ -100,8 +100,10 @@ two rows above, a candidate's `how` can end in `, second link` (a second account
 that also links back), `, shared by several accounts` (an email listed by more than one account on a
 platform), `, another email names a different account` (two emails point at two accounts on one
 platform), or read `same handle, report failed`.
-`email_agrees: true` on two matched accounts means both list the same email, a second piece of evidence.
-It is set only on accounts whose report the tool holds, so never on an account found by email alone.
+`email_agrees: true` on two matched accounts means both list the same email. It is set only on accounts
+whose report the tool holds, so never on an account found by email alone. It is a second piece of
+evidence only when `how` names another reason: on `same handle, confirmed by shared email` it is that
+same email.
 
 ## The endpoints
 
@@ -254,10 +256,11 @@ curl -X POST "https://api.modash.io/v1/email-search" \
 }
 ```
 
-The tool compares ids, not names. When two accounts on one platform list the address, none is accepted,
+The tool compares ids, not names. When two accounts on one platform list the address, or an account
+other than the creator's lists it on a platform the creator is already matched on, none is accepted,
 the accounts on missing platforms go to `candidates`, and step 5 does not count that address as
-evidence. The starting platform counts too: an address that a second Instagram account also lists
-belongs to an agency, not to the creator. When two emails name two different accounts on one
+evidence. So an address that a second Instagram account also lists belongs to an agency, not to the
+creator. When two emails name two different accounts on one
 platform, both go to `candidates`.
 
 ## Step 5: treat the same handle as a guess
@@ -291,7 +294,7 @@ Add 1 for each extra account a profile links on the same platform, 1 for each ex
 account checked in step 5, and one free lookup per extra name when the starting account has two. For 10,000 creators that is roughly 10,000 to 30,000 credits.
 A saved report is free to read again.
 
-Calls run one after another. Each is followed by a 0.6 second pause to space them out, and
+Calls run one after another. Each successful call is followed by a 0.6 second pause to space them out, and
 a creator takes 4 to 6 calls, so allow about 3 to 6 seconds per creator: roughly 8 to 17 hours for
 10,000.
 
