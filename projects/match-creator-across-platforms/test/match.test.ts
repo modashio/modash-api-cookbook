@@ -501,8 +501,8 @@ describe('matching', () => {
           {
             email: 'team@example.com',
             users: [
-              { platform: 'tiktok', userId: '8', username: 'amy' },
-              { platform: 'tiktok', userId: '9', username: 'bea' },
+              { platform: 'instagram', userId: '1', username: 'amy' },
+              { platform: 'instagram', userId: '2', username: 'bea' },
             ],
           },
         ],

@@ -43,7 +43,9 @@ cp .env.example .env        # then uncomment MODASH_API_TOKEN in .env and set it
 npm run match -- instagram example_baker
 ```
 
-The handle can also be a profile URL, such as `https://www.instagram.com/example_baker/`.
+The handle can also be a profile URL that shows it, such as `https://www.instagram.com/example_baker/`.
+A URL with only an id, such as `youtube.com/channel/UC...` or `tiktok.com/share/user/...`, is
+rejected: use the handle instead.
 
 For a list, make a CSV with the columns `platform` and `handle` (see `handles.example.csv`):
 
