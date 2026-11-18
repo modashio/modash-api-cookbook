@@ -108,6 +108,8 @@ export class Matcher {
     } catch (error) {
       if (error instanceof CreditBudgetExceededError) throw error;
       if (error instanceof ModashApiError && error.isFatal) throw error;
+      // Not found is an answer, not a failure: a rerun would get the same answer.
+      if (error instanceof ModashApiError && error.code === 'account_not_found') return undefined;
       this.#errors.push(`${what}: ${describe(error)}`);
       return undefined;
     }
@@ -214,7 +216,7 @@ export class Matcher {
     return [...ids];
   }
 
-  /** Step 4: one account per platform listing the email is a match; several are candidates. */
+  /** Step 4: one account per platform across the emails is a match; a shared address or a conflict gives candidates. */
   async #matchByEmail(start: Start, result: MatchResult): Promise<void> {
     const { accounts } = result;
     const missing = PLATFORMS.filter((p) => !accounts[p]);
@@ -229,25 +231,38 @@ export class Matcher {
             : [],
         ),
       ),
-      (row) => `${row.platform}:${row.userId}`,
+      (row) => `${row.email}:${row.platform}:${row.userId}`,
     );
-    const [known, fresh] = partition(rows, (row) => accounts[row.platform]?.userId === row.userId);
-    for (const row of known) accounts[row.platform]!.email_agrees = true;
+    // An address that two accounts on one platform list belongs to more than one person, so it proves nothing.
+    const sharedEmails = new Set(
+      Object.entries(groupBy(rows, 'email'))
+        .filter(([, emailRows]) => Object.values(groupBy(emailRows, 'platform')).some((group) => group.length > 1))
+        .map(([email]) => email),
+    );
+    for (const email of sharedEmails) start.emails.delete(email);
+    const [sharedRows, ownRows] = partition(rows, (row) => sharedEmails.has(row.email));
 
+    for (const row of ownRows) {
+      const account = accounts[row.platform];
+      if (account?.userId === row.userId) account.email_agrees = true;
+    }
     const byPlatform = groupBy(
-      fresh.filter((row) => missing.includes(row.platform)),
+      ownRows.filter((row) => missing.includes(row.platform)),
       'platform',
     );
     for (const group of Object.values(byPlatform)) {
-      for (const { email, ...row } of group) {
-        if (group.length === 1) {
-          this.#accept(result, { ...row, how: `email (${email})` });
-        } else {
-          // An address several accounts share cannot confirm a same-handle account in step 5 either.
-          start.emails.delete(email);
-          this.#suggest(result, { ...row, how: `email (${email}), shared by several accounts` });
-        }
+      const [first] = group;
+      if (first && uniqBy(group, 'userId').length === 1) {
+        const { email, ...row } = first;
+        this.#accept(result, { ...row, how: `email (${email})` });
+        continue;
       }
+      for (const { email, ...row } of group) {
+        this.#suggest(result, { ...row, how: `email (${email}), another email names a different account` });
+      }
+    }
+    for (const { email, ...row } of sharedRows.filter((r) => !accounts[r.platform])) {
+      this.#suggest(result, { ...row, how: `email (${email}), shared by several accounts` });
     }
   }
 
@@ -258,8 +273,9 @@ export class Matcher {
         if (result.accounts[other]) break;
         const row = await this.#safe(`lookup ${other} @${name}`, () => this.lookup(other, name));
         if (!row) continue;
-        const base = { platform: other, userId: row.userId, username: nameOf(row), followers: row.followers ?? null };
         const back = await this.#tryReport(other, row.userId);
+        const followers = back?.profile?.followers ?? row.followers ?? null;
+        const base = { platform: other, userId: row.userId, username: nameOf(row), followers };
         const shared = back ? [...emailsIn(back)].filter((e) => start.emails.has(e)).sort() : [];
         if (back && Matcher.pointsBack(back, start.platform, start.names, start.userId)) {
           this.#accept(result, { ...base, how: 'same handle, confirmed by its profile link back' });

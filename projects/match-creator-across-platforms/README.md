@@ -61,7 +61,7 @@ npm run match -- --csv handles.csv --max-credits 500
 - **Results** go to `output/results.jsonl`, one line per creator.
 - **Resume.** If a CSV run stops, run the same command again. Creators already finished, including ones not found on their starting platform, are skipped; creators that hit an error are tried again. A single-creator run replaces that creator's line and leaves the rest alone.
 - **Saved reports.** Every report is saved in `output/reports/`, so a rerun never pays for the same report twice. They do not expire: delete the folder to pull fresh data. The reports hold creators' contact emails, so do not commit, share or screen-record this folder.
-- **Errors.** An invalid token (`api_token_invalid`) or an empty balance (`not_enough_credits`) stops the run with the API's message. Any other failed call, such as a deleted account, is written to that creator's `errors` and the run goes on.
+- **Errors.** An invalid token (`api_token_invalid`) or an empty balance (`not_enough_credits`) stops the run with the API's message. A call that answers `account_not_found` is not an error: that account is skipped. Any other failed call is written to that creator's `errors` and the run goes on.
 
 `npm test` runs the tests offline, with no token and no network.
 
@@ -118,8 +118,8 @@ The responses below show the API's shape, trimmed, for the two invented creators
 
 ## Step 1: turn the handle into an id
 
-The report endpoint accepts a handle or a user id. This tool works in ids, because the links on a
-profile usually carry ids, and the free lookup confirms the account exists before a credit is spent.
+The report endpoint accepts a handle or a user id. This tool works in ids, because a profile link
+that carries an id needs no lookup, and the free lookup confirms the account exists before a credit is spent.
 The lookup can return more than one account, so keep the row whose handle matches exactly. If no row
 matches, the creator is recorded as not found and nothing is spent.
 
@@ -169,8 +169,10 @@ to the other platform's report endpoint, with no second lookup. `idFrom()` in
 
 ```ts
 platform === 'youtube'
-  ? /youtube\.com\/channel\/(UC[A-Za-z0-9_-]{20,})/i.exec(value)
-  : /tiktok\.com\/share\/user\/(\d+)/i.exec(value)
+  ? /youtube\.com\/channel\/(UC[A-Za-z0-9_-]{20,})/.exec(value.replace(/youtube\.com/i, 'youtube.com'))
+  : platform === 'tiktok'
+    ? /tiktok\.com\/share\/user\/(\d+)/i.exec(value)
+    : null
 ```
 
 A contact can also be a plain handle or a profile URL without an id, such as
@@ -252,7 +254,9 @@ curl -X POST "https://api.modash.io/v1/email-search" \
 
 The tool compares ids, not names. When the search also returns the account you started from, the tool marks it
 `email_agrees: true`. When several accounts on one platform share the address, none is accepted and
-all go to `candidates`, and step 5 does not count that address as evidence.
+all go to `candidates`, and step 5 does not count that address as evidence. This includes the starting
+platform: an address that a second Instagram account also lists belongs to an agency, not to the
+creator. When two emails name two different accounts on one platform, both go to `candidates`.
 
 ## Step 5: treat the same handle as a guess
 
@@ -285,7 +289,7 @@ Add 1 for each extra account a profile links on the same platform, 1 for each ex
 account checked in step 5, and one free lookup per extra name when the starting account has two. For 10,000 creators that is roughly 10,000 to 30,000 credits.
 A saved report is free to read again.
 
-Calls run one after another. Each is followed by a 0.6 second pause to stay under the rate limit, and
+Calls run one after another. Each is followed by a 0.6 second pause to space them out, and
 a creator takes 4 to 6 calls, so allow about 3 to 6 seconds per creator: roughly 8 to 17 hours for
 10,000.
 
@@ -293,9 +297,10 @@ Follower counts come from the report when the tool has one.
 
 ## What can go wrong
 
-- **The API is busy or rate-limited.** It answers HTTP 429, 500, 502, 503 or 504. The tool waits 3, 6, 9 then 12 seconds and tries again. If the call still fails, it goes into that creator's `errors` and a rerun tries again.
+- **HTTP 429 or a server error.** The tool waits 3, 6, 9 then 12 seconds and tries again. If the call still fails, it goes into that creator's `errors` and a rerun tries again.
+- **A report that is not ready.** A report answers 503 `retry_later` when the account's audience is not ready yet. The API asks for a retry in a few hours and does not charge for it, so the tool does not wait: the error goes into that creator's `errors` and a later rerun tries again.
 - **A timeout or a dropped connection.** A free call is tried again. A paid call is not, because the API may have finished it and sending it again could bill it twice. It goes into that creator's `errors`, its cost stays counted against the budget, and a rerun tries again.
-- **A deleted or private linked account.** Its report returns an error. The tool records it and the platform stays `missing`.
+- **A linked account that no longer exists.** When its report answers `account_not_found`, the tool skips it and the platform stays `missing`. Any other error goes into `errors`.
 - **Shared agency emails.** Several creators can list the same management address. The tool only accepts an email match when one account per platform lists it, but an agency address can still join two people. Accept email matches only where the address is the creator's own, or require a second signal.
 - **Handles change.** A link to `instagram.com/oldname` points at a renamed account. The lookup then misses, and the platform stays `missing`.
 - **Short links.** `vm.tiktok.com/...`, `youtu.be/...` and `instagr.am/...` do not carry a handle or an id, so the tool skips them without an error.

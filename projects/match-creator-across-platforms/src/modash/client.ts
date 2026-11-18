@@ -67,6 +67,10 @@ const isNetworkError = (error: unknown) =>
   (error instanceof TypeError && error.message === 'fetch failed') ||
   (error instanceof DOMException && error.name === 'TimeoutError');
 
+// A report whose audience is not ready answers 503 `retry_later`, and the API asks for a retry in a few hours.
+const isRetryLater = (response: ModashResponse) =>
+  (response.body as { code?: unknown } | null)?.code === 'retry_later';
+
 export class ModashClient {
   spent = 0;
   readonly #budget: number | undefined;
@@ -115,7 +119,7 @@ export class ModashClient {
     for (let attempt = 1; ; attempt += 1) {
       try {
         const response = await this.transport(request);
-        if (!RETRY_STATUSES.has(response.status) || attempt === ATTEMPTS) return response;
+        if (!RETRY_STATUSES.has(response.status) || isRetryLater(response) || attempt === ATTEMPTS) return response;
       } catch (error) {
         // Sending a paid call again after no answer could bill it twice.
         if (paid || !isNetworkError(error) || attempt === ATTEMPTS) throw error;

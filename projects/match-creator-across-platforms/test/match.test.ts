@@ -88,7 +88,7 @@ describe('errors and credits', () => {
     assert.equal(new ModashApiError('x', 404, 'account_not_found', '').isFatal, false);
   });
 
-  it('records a dead linked account and goes on', async () => {
+  it('skips a linked account that is not found, with no error', async () => {
     const saved = {
       ...amy,
       'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
@@ -98,8 +98,21 @@ describe('errors and credits', () => {
     const c = client(fake(saved));
     const r = await new Matcher(c).match('instagram', 'amy');
     assert.deepEqual(r.missing, ['tiktok', 'youtube']);
-    assert.ok(r.errors.length > 0);
+    assert.deepEqual(r.errors, []);
     assert.equal(c.spent, 1);
+  });
+
+  it('records a linked report that fails another way and goes on', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
+        { type: 'tiktok', value: 'https://www.tiktok.com/share/user/9' },
+      ]),
+    };
+    const t = fake(saved, { 'GET tiktok/profile/9/report': [403, 'feature_not_available'] });
+    const r = await new Matcher(client(t)).match('instagram', 'amy');
+    assert.equal(r.errors.length, 1);
+    assert.match(r.errors[0]!, /report tiktok 9/);
   });
 
   it('stops on a bad token', async () => {
@@ -138,6 +151,16 @@ describe('errors and credits', () => {
     };
     await new Matcher(client(t)).lookup('instagram', 'amy');
     assert.equal(calls, 3);
+  });
+
+  it('does not retry a report whose audience is not ready', async () => {
+    let calls = 0;
+    const t: Transport = async () => {
+      calls += 1;
+      return { status: 503, body: { error: true, code: 'retry_later', message: 'test' } };
+    };
+    await assert.rejects(new Matcher(client(t)).report('instagram', '1'), ModashApiError);
+    assert.equal(calls, 1);
   });
 
   it('does not retry an ordinary TypeError', async () => {
@@ -270,6 +293,61 @@ describe('matching', () => {
     const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok, undefined);
     assert.deepEqual(r.candidates.filter((c) => c.platform === 'tiktok').map((c) => c.userId).sort(), ['8', '9']);
+  });
+
+  it('does not accept an email that another account on the starting platform also lists', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
+      'POST email-search {"emails":["team@example.com"]}': {
+        matchedEmails: [
+          {
+            email: 'team@example.com',
+            users: [
+              { platform: 'instagram', userId: '1', username: 'amy' },
+              { platform: 'instagram', userId: '2', username: 'bea' },
+              { platform: 'youtube', userId: 'UCbea', username: 'bea' },
+            ],
+          },
+        ],
+      },
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.youtube, undefined);
+    assert.equal(r.accounts.instagram?.email_agrees, undefined);
+    assert.deepEqual(r.candidates.map((c) => c.userId), ['UCbea']);
+  });
+
+  it('lists both accounts when two emails name different accounts on one platform', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
+        { type: 'email', value: 'a@example.com' },
+        { type: 'email', value: 'b@example.com' },
+      ]),
+      'POST email-search {"emails":["a@example.com","b@example.com"]}': {
+        matchedEmails: [
+          { email: 'a@example.com', users: [{ platform: 'tiktok', userId: '8', username: 'cat' }] },
+          { email: 'b@example.com', users: [{ platform: 'tiktok', userId: '9', username: 'dan' }] },
+        ],
+      },
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.tiktok, undefined);
+    assert.deepEqual(r.candidates.map((c) => c.userId).sort(), ['8', '9']);
+  });
+
+  it('takes the follower count of a same-handle match from its report', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, []),
+      'GET tiktok/users?query=amy': { users: [{ userId: '9', username: 'amy', followers: 100 }] },
+      'GET tiktok/profile/9/report': report('9', { username: 'amy', followers: 250000 }, [
+        { type: 'instagram', value: 'https://www.instagram.com/amy' },
+      ]),
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.tiktok?.followers, 250000);
   });
 
   it('records a creator who is not found without an error', async () => {
