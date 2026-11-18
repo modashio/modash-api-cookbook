@@ -551,6 +551,25 @@ describe('matching', () => {
     assert.equal(r.accounts.instagram?.email_agrees, true);
   });
 
+  it('marks email agreement between two same-handle matches when the start lists no email', async () => {
+    const linksBack = [
+      { type: 'email', value: 'amy@example.com' },
+      { type: 'instagram', value: 'https://www.instagram.com/amy' },
+    ];
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, []),
+      'GET tiktok/users?query=amy': { users: [{ userId: '9', username: 'amy' }] },
+      'GET tiktok/profile/9/report': report('9', { username: 'amy' }, linksBack),
+      'GET youtube/users?query=amy': { users: [{ userId: 'UC9', handle: '@amy' }] },
+      'GET youtube/profile/UC9/report': report('UC9', { handle: '@amy' }, linksBack),
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.tiktok?.email_agrees, true);
+    assert.equal(r.accounts.youtube?.email_agrees, true);
+    assert.equal(r.accounts.instagram?.email_agrees, undefined);
+  });
+
   it('lists an account once when two steps find it', async () => {
     const saved = {
       ...amy,

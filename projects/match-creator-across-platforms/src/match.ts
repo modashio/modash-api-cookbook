@@ -46,6 +46,8 @@ interface Start {
   emails: Set<string>;
   /** Which account email search tied to each email, per platform. */
   emailHits: { email: string; platform: Platform; userId: string }[];
+  /** Emails that more than one account lists, so they prove nothing. */
+  sharedEmails: Set<string>;
 }
 
 function describe(error: unknown): string {
@@ -148,6 +150,7 @@ export class Matcher {
       report,
       emails: emailsIn(report),
       emailHits: [],
+      sharedEmails: new Set(),
     };
   }
 
@@ -213,23 +216,23 @@ export class Matcher {
       ),
       (row) => `${row.email}:${row.platform}:${row.userId}`,
     );
-    // The spec does not promise that email search returns every account listing an address, so count the ones already found too.
-    const listedByFound = this.#emailsOfFound(accounts);
-    const listings = uniqBy([...rows, ...listedByFound], (row) => `${row.email}:${row.platform}:${row.userId}`);
     // An address belongs to more than one person when two accounts on one platform list it, or when an account
     // other than the creator's lists it on a platform where the creator is already matched. Then it proves nothing.
-    const listedByOthers = (emailRows: typeof listings) =>
+    const listedByOthers = (emailRows: typeof rows) =>
       Object.entries(groupBy(emailRows, 'platform')).some(([platform, group]) => {
         const listers = uniq(group.map((row) => row.userId));
         const matched = isPlatform(platform) ? accounts[platform]?.userId : undefined;
         return listers.length > 1 || (matched !== undefined && listers[0] !== matched);
       });
     const sharedEmails = new Set(
-      Object.entries(groupBy(listings, 'email'))
+      Object.entries(groupBy(rows, 'email'))
         .filter(([, emailRows]) => listedByOthers(emailRows))
         .map(([email]) => email),
     );
-    for (const email of sharedEmails) start.emails.delete(email);
+    for (const email of sharedEmails) {
+      start.emails.delete(email);
+      start.sharedEmails.add(email);
+    }
     const [sharedRows, ownRows] = partition(rows, (row) => sharedEmails.has(row.email));
     start.emailHits = ownRows;
     const byPlatform = groupBy(
@@ -254,7 +257,7 @@ export class Matcher {
 
   /** An email that matched accounts on two platforms both list is a second piece of evidence for both. */
   #markEmailAgreement(start: Start, { accounts }: MatchResult): void {
-    const listings = this.#emailsOfFound(accounts).filter((row) => start.emails.has(row.email));
+    const listings = this.#emailsOfFound(accounts).filter((row) => !start.sharedEmails.has(row.email));
     for (const group of Object.values(groupBy(listings, 'email'))) {
       if (uniqBy(group, 'platform').length < 2) continue;
       for (const { platform } of group) accounts[platform]!.email_agrees = true;

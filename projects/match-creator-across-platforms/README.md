@@ -97,10 +97,11 @@ The kinds of evidence, strongest first:
 
 `accounts` holds only matches with evidence from both sides. `candidates` holds the rest. Besides the
 two rows above, a candidate's `how` can end in `, second link` (a second account on the same platform
-that also links back), `, shared by several accounts` (an email listed by more than one account on a
-platform), `, another email names a different account` (two emails point at two accounts on one
+that also links back), `, shared by several accounts` (an email that another account also lists, on
+this platform or on one where the creator is already matched), `, another email names a different account` (two emails point at two accounts on one
 platform), or read `same handle, report failed`.
-`email_agrees: true` on two matched accounts means both list the same email. It is set only on accounts
+`email_agrees: true` on two matched accounts means both list the same email, and no other account
+is known to list it. It is set only on accounts
 whose report the tool holds, so never on an account found by email alone. It is a second piece of
 evidence only when `how` names another reason: on `same handle, confirmed by shared email` it is that
 same email.
