@@ -1,14 +1,16 @@
-import { emailsIn, handleFrom, idFrom, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
+import { groupBy, partition, remove, uniqBy } from 'lodash-es';
+
+import { emailsIn, handleFrom, idFrom, isPlatform, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
 import type { ModashClient } from './modash/client.js';
-import { CreditBudgetExceededError, ModashApiError, round2 } from './modash/errors.js';
+import { CreditBudgetExceededError, ModashApiError } from './modash/errors.js';
 import {
   emailSearchResponseSchema,
   type ReportProfile,
   reportResponseSchema,
-  searchResponseSchema,
   type UserRow,
   usersResponseSchema,
 } from './modash/responses.js';
+import { round2 } from './numbers.js';
 
 export interface Account {
   userId: string;
@@ -38,6 +40,17 @@ export interface ReportCache {
 
 type Found = UserRow & { userId: string };
 
+/** The account the run started from, and what its report says about it. */
+interface Start {
+  platform: Platform;
+  userId: string;
+  /** Every name the account answers to, lower case, the input handle first. */
+  names: Set<string>;
+  report: ReportProfile;
+  /** Emails on the starting report and on accounts confirmed both ways. */
+  emails: Set<string>;
+}
+
 function describe(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
   const code = (error.cause as { code?: unknown } | undefined)?.code;
@@ -45,50 +58,29 @@ function describe(error: unknown): string {
 }
 
 const REPORT_COST = 1;
-const SEARCH_ROW_COST = 0.01;
-const SEARCH_PAGE_ROWS = 15;
 const EMAIL_MATCH_COST = 0.02;
 
 export class Matcher {
   #errors: string[] = [];
+  /** Reports asked for while matching one creator (null when the call failed), so none is paid for twice. */
+  #reports = new Map<string, ReportProfile | null>();
 
   constructor(
     private readonly client: ModashClient,
     private readonly cache?: ReportCache,
   ) {}
 
-  /** The lookup can return several close matches; keep only the exact handle. */
+  /** The lookup can return more than one account; keep the exact handle, and a current handle over an older name. */
   async lookup(platform: Platform, handle: string): Promise<Found | undefined> {
     const data = await this.client.call(
       { method: 'GET', path: `${platform}/users`, query: { query: handle, limit: '10' } },
       usersResponseSchema,
     );
     const wanted = handle.toLowerCase();
-    return (data.users ?? []).find((row): row is Found => !!row.userId && namesOf(row).has(wanted));
-  }
-
-  async find(platform: Platform, handle: string): Promise<Found | undefined> {
-    const row = await this.lookup(platform, handle);
-    if (row) return row;
-    const data = await this.client.call(
-      {
-        method: 'POST',
-        path: `${platform}/search`,
-        // hasAudienceData defaults to true on search, which would leave out creators without audience data
-        body: { page: 0, filter: { influencer: { relevance: [`@${handle}`], hasAudienceData: false } } },
-      },
-      searchResponseSchema,
-      {
-        max: SEARCH_ROW_COST * SEARCH_PAGE_ROWS,
-        actual: (d) => SEARCH_ROW_COST * Math.min((d.directs ?? []).length + (d.lookalikes ?? []).length, SEARCH_PAGE_ROWS),
-      },
+    const rows = (data.users ?? []).filter((row): row is Found => !!row.userId);
+    return (
+      rows.find((row) => (nameOf(row) ?? '').toLowerCase() === wanted) ?? rows.find((row) => namesOf(row).has(wanted))
     );
-    const wanted = handle.toLowerCase();
-    for (const hit of [...(data.directs ?? []), ...(data.lookalikes ?? [])]) {
-      const profile = hit.profile ?? hit;
-      if (hit.userId && namesOf(profile).has(wanted)) return { ...profile, userId: hit.userId };
-    }
-    return undefined;
   }
 
   async report(platform: Platform, userId: string): Promise<ReportProfile> {
@@ -131,6 +123,7 @@ export class Matcher {
 
   async match(platform: Platform, handle: string): Promise<MatchResult> {
     this.#errors = [];
+    this.#reports.clear();
     const spentBefore = this.client.spent;
     const result: MatchResult = {
       input: { platform, handle },
@@ -141,7 +134,12 @@ export class Matcher {
       errors: [],
     };
     try {
-      await this.#match(platform, handle, result);
+      const start = await this.#readStart(platform, handle, result);
+      if (start) {
+        await this.#followProfileLinks(start, result);
+        await this.#matchByEmail(start, result);
+        await this.#trySameHandle(start, result);
+      }
     } catch (error) {
       if (error instanceof CreditBudgetExceededError) throw error;
       if (error instanceof ModashApiError && error.isFatal) throw error;
@@ -153,110 +151,145 @@ export class Matcher {
     return result;
   }
 
-  async #match(platform: Platform, handle: string, result: MatchResult): Promise<void> {
-    const { accounts, candidates } = result;
-    const me = await this.#safe(`find ${platform} @${handle}`, () => this.find(platform, handle));
-    if (!me) return;
-    const startNames = new Set([...namesOf(me), handle.toLowerCase()]);
-    accounts[platform] = { userId: me.userId, username: nameOf(me), followers: me.followers ?? null, how: 'input' };
-    const start = await this.#safe(`report ${platform} ${me.userId}`, () => this.report(platform, me.userId));
-    if (!start) return;
-    accounts[platform].followers = start.profile?.followers ?? me.followers ?? null;
-    const emails = emailsIn(start);
+  /** Step 1: turn the handle into an id, then pull that account's report. */
+  async #readStart(platform: Platform, handle: string, { accounts }: MatchResult): Promise<Start | undefined> {
+    const me = await this.#safe(`lookup ${platform} @${handle}`, () => this.lookup(platform, handle));
+    if (!me) return undefined;
+    const account: Account = { userId: me.userId, username: nameOf(me), followers: me.followers ?? null, how: 'input' };
+    accounts[platform] = account;
+    const report = await this.#tryReport(platform, me.userId);
+    if (!report) return undefined;
+    account.followers = report.profile?.followers ?? account.followers;
+    return {
+      platform,
+      userId: me.userId,
+      names: new Set([handle.toLowerCase(), ...namesOf(me), ...namesOf(report.profile)]),
+      report,
+      emails: emailsIn(report),
+    };
+  }
 
-    // Steps 2 and 3
+  /** Steps 2 and 3: a linked account is a match only when its own report links back to the start. */
+  async #followProfileLinks(start: Start, result: MatchResult): Promise<void> {
     for (const other of PLATFORMS) {
-      if (other === platform) continue;
-      const found: Account[] = [];
-      const seen = new Set<string>();
-      for (const contact of start.contacts ?? []) {
-        if (contact.type !== other || !contact.value) continue;
-        let otherId = idFrom(other, contact.value);
-        if (!otherId) {
-          const h = handleFrom(other, contact.value);
-          const row = h ? await this.#safe(`lookup ${other} @${h}`, () => this.lookup(other, h)) : undefined;
-          otherId = row?.userId;
-        }
-        if (!otherId || seen.has(otherId)) continue;
-        seen.add(otherId);
-        const id = otherId;
-        const back = await this.#safe(`report ${other} ${id}`, () => this.report(other, id));
-        if (!back) continue;
-        for (const e of emailsIn(back)) emails.add(e);
-        found.push({
-          userId: id,
-          username: nameOf(back.profile),
-          followers: back.profile?.followers ?? null,
-          how: Matcher.pointsBack(back, platform, startNames, me.userId) ? 'confirmed both ways' : 'profile link, one way',
+      if (other === start.platform) continue;
+      const linked: { account: Account; report: ReportProfile }[] = [];
+      for (const userId of await this.#linkedIds(start, other)) {
+        const report = await this.#tryReport(other, userId);
+        if (!report) continue;
+        linked.push({
+          report,
+          account: { userId, username: nameOf(report.profile), followers: report.profile?.followers ?? null, how: '' },
         });
       }
-      found.sort((a, b) => Number(a.how !== 'confirmed both ways') - Number(b.how !== 'confirmed both ways'));
-      const [best, ...rest] = found;
-      if (best) accounts[other] = best;
-      for (const a of rest) candidates.push({ platform: other, ...a, how: `${a.how}, second link` });
+      const [[match, ...alsoConfirmed], oneWay] = partition(linked, ({ report }) =>
+        Matcher.pointsBack(report, start.platform, start.names, start.userId),
+      );
+      if (match) {
+        result.accounts[other] = { ...match.account, how: 'confirmed both ways' };
+        for (const email of emailsIn(match.report)) start.emails.add(email);
+      }
+      for (const { account } of alsoConfirmed) {
+        this.#suggest(result, { platform: other, ...account, how: 'confirmed both ways, second link' });
+      }
+      for (const { account } of oneWay) {
+        this.#suggest(result, { platform: other, ...account, how: 'profile link, one way' });
+      }
     }
+  }
 
-    // Step 4
+  async #linkedIds(start: Start, other: Platform): Promise<string[]> {
+    const ids = new Set<string>();
+    for (const contact of start.report.contacts ?? []) {
+      if (contact.type !== other || !contact.value) continue;
+      const id = idFrom(other, contact.value);
+      if (id) {
+        ids.add(id);
+        continue;
+      }
+      const handle = handleFrom(other, contact.value);
+      const row = handle ? await this.#safe(`lookup ${other} @${handle}`, () => this.lookup(other, handle)) : undefined;
+      if (row) ids.add(row.userId);
+    }
+    return [...ids];
+  }
+
+  /** Step 4: one account per platform listing the email is a match; several are candidates. */
+  async #matchByEmail(start: Start, result: MatchResult): Promise<void> {
+    const { accounts } = result;
     const missing = PLATFORMS.filter((p) => !accounts[p]);
-    if (missing.length > 0 && emails.size > 0) {
-      const data = await this.#safe('email search', () => this.emailSearch([...emails].sort()));
-      const hits = new Map<Platform, Map<string, Candidate>>();
-      for (const m of data?.matchedEmails ?? []) {
-        for (const row of m.users ?? []) {
-          const p = row.platform;
-          if (!row.userId || !p || !(PLATFORMS as readonly string[]).includes(p)) continue;
-          const plat = p as Platform;
-          const existing = accounts[plat];
-          if (existing?.userId === row.userId) {
-            existing.email_agrees = true;
-          } else if (missing.includes(plat)) {
-            const byId = hits.get(plat) ?? new Map<string, Candidate>();
-            byId.set(row.userId, {
-              platform: plat,
-              userId: row.userId,
-              username: nameOf(row),
-              followers: row.followers ?? null,
-              how: `email (${m.email ?? ''})`,
-            });
-            hits.set(plat, byId);
-          }
-        }
-      }
-      for (const [plat, byId] of hits) {
-        const rows = [...byId.values()];
-        if (rows.length === 1) {
-          const { platform: _platform, ...account } = rows[0]!;
-          accounts[plat] = account;
-        } else {
-          for (const r of rows) candidates.push({ ...r, how: `${r.how}, shared by several accounts` });
-        }
-      }
-    }
+    if (missing.length === 0 || start.emails.size === 0) return;
+    const data = await this.#safe('email search', () => this.emailSearch([...start.emails].sort()));
 
-    // Step 5
-    for (const other of PLATFORMS.filter((p) => !accounts[p])) {
-      const row = await this.#safe(`lookup ${other} @${handle}`, () => this.lookup(other, handle));
-      if (!row) continue;
-      const base = { userId: row.userId, username: nameOf(row), followers: row.followers ?? null };
-      const back = await this.#safe(`report ${other} ${row.userId}`, () => this.report(other, row.userId));
-      const shared = back ? [...emailsIn(back)].filter((e) => emails.has(e)).sort() : [];
-      let how: string | undefined;
-      if (back && Matcher.pointsBack(back, platform, startNames, me.userId)) {
-        how = 'same handle, confirmed by its profile link back';
-      } else if (shared.length > 0) {
-        how = `same handle, confirmed by shared email (${shared[0]})`;
-      }
-      const sameRow = (c: Candidate) => c.platform === other && c.userId === row.userId;
-      if (how) {
-        candidates.splice(0, candidates.length, ...candidates.filter((c) => !sameRow(c)));
-        accounts[other] = { ...base, how };
-      } else if (!candidates.some(sameRow)) {
-        candidates.push({
-          platform: other,
-          ...base,
-          how: back ? 'same handle, unconfirmed' : 'same handle, report failed',
-        });
+    const rows = uniqBy(
+      (data?.matchedEmails ?? []).flatMap(({ email, users }) =>
+        (users ?? []).flatMap(({ platform, userId, followers, ...row }) =>
+          userId && platform && isPlatform(platform)
+            ? [{ email: (email ?? '').toLowerCase(), platform, userId, username: nameOf(row), followers: followers ?? null }]
+            : [],
+        ),
+      ),
+      (row) => `${row.platform}:${row.userId}`,
+    );
+    const [known, fresh] = partition(rows, (row) => accounts[row.platform]?.userId === row.userId);
+    for (const row of known) accounts[row.platform]!.email_agrees = true;
+
+    const byPlatform = groupBy(
+      fresh.filter((row) => missing.includes(row.platform)),
+      'platform',
+    );
+    for (const group of Object.values(byPlatform)) {
+      for (const { email, ...row } of group) {
+        if (group.length === 1) {
+          this.#accept(result, { ...row, how: `email (${email})` });
+        } else {
+          // An address several accounts share cannot confirm a same-handle account in step 5 either.
+          start.emails.delete(email);
+          this.#suggest(result, { ...row, how: `email (${email}), shared by several accounts` });
+        }
       }
     }
+  }
+
+  /** Step 5: an account with one of the start's names is a guess until its own report confirms it. */
+  async #trySameHandle(start: Start, result: MatchResult): Promise<void> {
+    for (const other of PLATFORMS.filter((p) => !result.accounts[p])) {
+      for (const name of start.names) {
+        if (result.accounts[other]) break;
+        const row = await this.#safe(`lookup ${other} @${name}`, () => this.lookup(other, name));
+        if (!row) continue;
+        const base = { platform: other, userId: row.userId, username: nameOf(row), followers: row.followers ?? null };
+        const back = await this.#tryReport(other, row.userId);
+        const shared = back ? [...emailsIn(back)].filter((e) => start.emails.has(e)).sort() : [];
+        if (back && Matcher.pointsBack(back, start.platform, start.names, start.userId)) {
+          this.#accept(result, { ...base, how: 'same handle, confirmed by its profile link back' });
+        } else if (shared.length > 0) {
+          this.#accept(result, { ...base, how: `same handle, confirmed by shared email (${shared[0]})` });
+        } else {
+          this.#suggest(result, { ...base, how: back ? 'same handle, unconfirmed' : 'same handle, report failed' });
+        }
+      }
+    }
+  }
+
+  /** A report that failed is not asked for again for the same creator: the failed call may have been billed. */
+  async #tryReport(platform: Platform, userId: string): Promise<ReportProfile | undefined> {
+    const key = `${platform}:${userId}`;
+    if (!this.#reports.has(key)) {
+      const report = await this.#safe(`report ${platform} ${userId}`, () => this.report(platform, userId));
+      this.#reports.set(key, report ?? null);
+    }
+    return this.#reports.get(key) ?? undefined;
+  }
+
+  #accept(result: MatchResult, { platform, ...account }: Candidate): void {
+    remove(result.candidates, (c) => c.platform === platform && c.userId === account.userId);
+    result.accounts[platform] = account;
+  }
+
+  /** An account already listed keeps its first, stronger reason. */
+  #suggest(result: MatchResult, candidate: Candidate): void {
+    const listed = result.candidates.some((c) => c.platform === candidate.platform && c.userId === candidate.userId);
+    if (!listed) result.candidates.push(candidate);
   }
 }

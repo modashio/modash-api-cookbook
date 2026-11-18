@@ -19,7 +19,7 @@ const OWN_SITE: Record<Platform, RegExp> = {
 
 const NOT_A_PROFILE = new Set([
   'p', 'reel', 'reels', 'stories', 'explore', 'tv', 'watch', 'shorts', 'playlist', 'results',
-  'channel', 'share', 'video', 'tag', 'music', 'discover', 'accounts', 'direct', '_u', 'about',
+  'channel', 'share', 'video', 'tag', 'music', 'discover', 'accounts', 'direct', '_u', 'about', 'c', 'user',
 ]);
 
 /** A profile link that carries an account id the report endpoint takes, so no lookup is needed. */
@@ -27,7 +27,7 @@ export function idFrom(platform: Platform, value: string | null | undefined): st
   if (!value) return undefined;
   const match =
     platform === 'youtube'
-      ? /youtube\.com\/channel\/(UC[A-Za-z0-9_-]{20,})/i.exec(value)
+      ? /youtube\.com\/channel\/(UC[A-Za-z0-9_-]{20,})/.exec(value.replace(/youtube\.com/i, 'youtube.com'))
       : platform === 'tiktok'
         ? /tiktok\.com\/share\/user\/(\d+)/i.exec(value)
         : null;

@@ -9,7 +9,6 @@ export const userRowSchema = z.looseObject({
   userId: id.nullish(),
   username: z.string().nullish(),
   handle: z.string().nullish(),
-  fullname: z.string().nullish(),
   followers: z.number().nullish(),
 });
 export type UserRow = z.infer<typeof userRowSchema>;
@@ -33,15 +32,6 @@ export type ReportProfile = z.infer<typeof reportProfileSchema>;
 export const reportResponseSchema = z.looseObject({
   profile: reportProfileSchema,
 });
-
-const searchRowSchema = userRowSchema.extend({ profile: userRowSchema.nullish() });
-
-export const searchResponseSchema = z
-  .looseObject({
-    directs: z.array(searchRowSchema).nullish(),
-    lookalikes: z.array(searchRowSchema).nullish(),
-  })
-  .refine((d) => Array.isArray(d.directs) || Array.isArray(d.lookalikes), 'no directs or lookalikes in the response');
 
 export const emailSearchResponseSchema = z.looseObject({
   matchedEmails: z

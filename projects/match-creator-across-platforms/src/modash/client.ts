@@ -44,7 +44,7 @@ export function liveTransport(token: string): Transport {
 
 export interface ClientOptions {
   budget?: number | undefined;
-  /** Pause after each successful call, to stay under about 2 calls a second. */
+  /** Pause after each successful call, to stay under the rate limit. */
   pauseMs?: number;
   /** First retry wait; later retries wait 2x, 3x, 4x this. */
   retryDelayMs?: number;
@@ -87,17 +87,14 @@ export class ModashClient {
       throw new CreditBudgetExceededError(this.#budget, this.spent);
     }
     this.spent += cost.max;
-    let response: ModashResponse;
-    try {
-      response = await this.#send(request);
-    } catch (error) {
-      this.spent -= cost.max;
-      throw error;
-    }
+    const paid = cost.max > 0;
+    // If this throws, no answer came back. A paid call may still have run and been billed, so its hold is kept.
+    const response = await this.#send(request, paid);
 
     const body = response.body as { error?: unknown; code?: unknown; message?: unknown } | null;
     if (response.status >= 400 || typeof body !== 'object' || body === null || body.error === true) {
-      this.spent -= cost.max;
+      // A 200 can be billed whatever its body says, so only an error status releases the hold.
+      if (response.status >= 400) this.spent -= cost.max;
       const code = typeof body?.code === 'string' ? body.code : undefined;
       const message = Array.isArray(body?.message) ? body.message.join('; ') : String(body?.message ?? '');
       throw new ModashApiError(request.path, response.status, code, message);
@@ -105,7 +102,6 @@ export class ModashClient {
 
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
-      // A 200 is billed even when its body is not what we expected, so the hold is kept.
       const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
       throw new ModashApiError(request.path, response.status, 'unexpected_response', issues);
     }
@@ -115,13 +111,14 @@ export class ModashClient {
     return parsed.data;
   }
 
-  async #send(request: ModashRequest): Promise<ModashResponse> {
+  async #send(request: ModashRequest, paid: boolean): Promise<ModashResponse> {
     for (let attempt = 1; ; attempt += 1) {
       try {
         const response = await this.transport(request);
         if (!RETRY_STATUSES.has(response.status) || attempt === ATTEMPTS) return response;
       } catch (error) {
-        if (!isNetworkError(error) || attempt === ATTEMPTS) throw error;
+        // Sending a paid call again after no answer could bill it twice.
+        if (paid || !isNetworkError(error) || attempt === ATTEMPTS) throw error;
       }
       await sleep(this.#retryDelayMs * attempt);
     }

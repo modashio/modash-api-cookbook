@@ -2,13 +2,16 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { uniqBy } from 'lodash-es';
+
 import { loadConfig } from './config.js';
 import { handleFrom, isPlatform, PLATFORMS, type Platform } from './contacts.js';
 import { type MatchResult, Matcher, type ReportCache } from './match.js';
 import { liveTransport, ModashClient } from './modash/client.js';
-import { CreditBudgetExceededError, ModashApiError, round2 } from './modash/errors.js';
+import { CreditBudgetExceededError, ModashApiError } from './modash/errors.js';
 import { MOCK_HANDLES, mockTransport } from './modash/mock.js';
 import { reportProfileSchema, type ReportProfile } from './modash/responses.js';
+import { round2 } from './numbers.js';
 
 export interface RunOptions {
   argv: string[];
@@ -94,14 +97,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   if (mock && existsSync(resultsFile)) {
     unlinkSync(resultsFile);
   } else if (values.csv !== undefined && existsSync(resultsFile)) {
-    const kept: string[] = [];
-    for (const { key, line, failed } of readResults(resultsFile)) {
-      if (!failed && !done.has(key)) {
-        kept.push(line);
-        done.add(key);
-      }
-    }
-    writeLines(resultsFile, kept);
+    for (const key of keepFinished(resultsFile)) done.add(key);
   }
 
   let ran = 0;
@@ -124,6 +120,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
     } catch (error) {
       if (error instanceof CreditBudgetExceededError || (error instanceof ModashApiError && error.isFatal)) {
         print(`Stopped at @${handle}: ${error.message}`);
+        print(`Credits this run: ${round2(client.spent)}`);
         print(`Finished creators are in ${shown}. Run the same command again to carry on.`);
         return 1;
       }
@@ -146,6 +143,19 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   else if (mock) print(`Results in ${shown}. This was mock mode, so nothing was spent; a live run of the same creators costs ${total} credits.`);
   else print(`Results in ${shown}. Credits this run: ${total}`);
   return 0;
+}
+
+/** Rewrites a results file to the first good result per creator, and returns the creators it kept. */
+export function keepFinished(resultsFile: string): string[] {
+  const kept = uniqBy(
+    readResults(resultsFile).filter((r) => !r.failed),
+    'key',
+  );
+  writeLines(
+    resultsFile,
+    kept.map((r) => r.line),
+  );
+  return kept.map((r) => r.key);
 }
 
 export function cleanInput(platform: string | undefined, handle: string | undefined): [Platform, string] {
@@ -181,7 +191,13 @@ export function readCsv(path: string): [string, string][] {
   } catch (error) {
     throw new UsageError(`could not read ${path}: ${(error as Error).message}`);
   }
-  const [header, ...rows] = parseCsv(text);
+  let parsed: string[][];
+  try {
+    parsed = parseCsv(text);
+  } catch (error) {
+    throw new UsageError(`${path}: ${(error as Error).message}`);
+  }
+  const [header, ...rows] = parsed;
   const columns = (header ?? []).map((c) => c.trim().toLowerCase());
   const pi = columns.indexOf('platform');
   const hi = columns.indexOf('handle');
@@ -204,7 +220,7 @@ export function parseCsv(text: string): string[][] {
         i += 1;
       } else if (ch === '"') quoted = false;
       else field += ch;
-    } else if (ch === '"') quoted = true;
+    } else if (ch === '"' && field === '') quoted = true;
     else if (ch === ',') {
       row.push(field);
       field = '';
@@ -216,6 +232,7 @@ export function parseCsv(text: string): string[][] {
       field = '';
     } else field += ch;
   }
+  if (quoted) throw new Error('a quoted field never closes');
   if (field !== '' || row.length > 0) {
     row.push(field);
     rows.push(row);

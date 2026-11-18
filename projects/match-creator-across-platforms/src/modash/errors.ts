@@ -1,3 +1,5 @@
+import { round2 } from '../numbers.js';
+
 /** Codes after which every later call fails too, so a batch should stop rather than log each one. */
 const FATAL_CODES = new Set(['api_token_invalid', 'not_enough_credits']);
 
@@ -27,5 +29,3 @@ export class CreditBudgetExceededError extends Error {
     this.name = 'CreditBudgetExceededError';
   }
 }
-
-export const round2 = (n: number): number => Math.round(n * 100) / 100;
