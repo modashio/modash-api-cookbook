@@ -485,6 +485,43 @@ describe('matching', () => {
     assert.equal(r.accounts.tiktok, undefined);
   });
 
+  it('does not confirm a same-handle account by an email search tied to another account there', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
+        { type: 'email', value: 'amy@example.com' },
+        { type: 'email', value: 'team@example.com' },
+      ]),
+      'POST email-search {"emails":["amy@example.com","team@example.com"]}': {
+        matchedEmails: [
+          { email: 'amy@example.com', users: [{ platform: 'tiktok', userId: '7', username: 'cat' }] },
+          { email: 'team@example.com', users: [{ platform: 'tiktok', userId: '8', username: 'dan' }] },
+        ],
+      },
+      'GET tiktok/users?query=amy': { users: [{ userId: '9', username: 'amy' }] },
+      'GET tiktok/profile/9/report': report('9', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.tiktok, undefined);
+    assert.deepEqual(r.candidates.map((c) => c.userId).sort(), ['7', '8', '9']);
+  });
+
+  it('marks email agreement on a same-handle match', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [{ type: 'email', value: 'amy@example.com' }]),
+      'POST email-search {"emails":["amy@example.com"]}': { matchedEmails: [] },
+      'GET tiktok/users?query=amy': { users: [{ userId: '9', username: 'amy' }] },
+      'GET tiktok/profile/9/report': report('9', { username: 'amy' }, [
+        { type: 'email', value: 'amy@example.com' },
+        { type: 'instagram', value: 'https://www.instagram.com/amy' },
+      ]),
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.tiktok?.email_agrees, true);
+    assert.equal(r.accounts.instagram?.email_agrees, true);
+  });
+
   it('lists an account once when two steps find it', async () => {
     const saved = {
       ...amy,
@@ -565,6 +602,13 @@ describe('command line', () => {
     assert.equal(await run({ argv: ['--mock', '--csv', csv], env: {}, cwd: dir, print }), 0);
     assert.match(lines.join('\n'), /row 2 skipped/);
     assert.equal(readFileSync(join(dir, 'output', 'mock-results.jsonl'), 'utf8').trim().split('\n').length, 1);
+  });
+
+  it('turns an unreadable single handle into a usage message', async () => {
+    await assert.rejects(
+      run({ argv: ['--mock', 'instagram', 'https://x.com/amy'], env: {}, print: () => {} }),
+      /could not read a instagram handle/,
+    );
   });
 
   it('turns an unknown flag into a usage message', async () => {

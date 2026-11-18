@@ -44,6 +44,8 @@ interface Start {
   report: ReportProfile;
   /** Emails on the starting report and on accounts confirmed both ways. */
   emails: Set<string>;
+  /** Which account email search tied to each email, per platform. */
+  emailHits: { email: string; platform: Platform; userId: string }[];
 }
 
 function describe(error: unknown): string {
@@ -116,8 +118,8 @@ export class Matcher {
       if (start) {
         await this.#followProfileLinks(start, result);
         await this.#matchByEmail(start, result);
-        this.#markEmailAgreement(start, result);
         await this.#trySameHandle(start, result);
+        this.#markEmailAgreement(start, result);
       }
     } catch (error) {
       if (error instanceof CreditBudgetExceededError) throw error;
@@ -145,6 +147,7 @@ export class Matcher {
       names: new Set([handle.toLowerCase(), ...namesOf(me), ...namesOf(report.profile)]),
       report,
       emails: emailsIn(report),
+      emailHits: [],
     };
   }
 
@@ -221,6 +224,7 @@ export class Matcher {
     );
     for (const email of sharedEmails) start.emails.delete(email);
     const [sharedRows, ownRows] = partition(rows, (row) => sharedEmails.has(row.email));
+    start.emailHits = ownRows;
     const byPlatform = groupBy(
       ownRows.filter((row) => missing.includes(row.platform)),
       'platform',
@@ -269,7 +273,10 @@ export class Matcher {
         const back = await this.#tryReport(other, row.userId);
         const followers = back?.profile?.followers ?? row.followers ?? null;
         const base = { platform: other, userId: row.userId, username: nameOf(row), followers };
-        const shared = back ? [...emailsIn(back)].filter((e) => start.emails.has(e)).sort() : [];
+        // An email that search tied to a different account on this platform is listed by two accounts there.
+        const tiedToOther = (email: string) =>
+          start.emailHits.some((hit) => hit.email === email && hit.platform === other && hit.userId !== row.userId);
+        const shared = back ? [...emailsIn(back)].filter((e) => start.emails.has(e) && !tiedToOther(e)).sort() : [];
         if (back && Matcher.pointsBack(back, start.platform, start.names, start.userId)) {
           this.#accept(result, { ...base, how: 'same handle, confirmed by its profile link back' });
         } else if (shared.length > 0) {

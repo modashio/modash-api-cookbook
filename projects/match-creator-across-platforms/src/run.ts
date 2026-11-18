@@ -79,6 +79,11 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
     todo = readCsv(values.csv);
   } else if (positionals.length === 2) {
     todo = [[positionals[0]!, positionals[1]!]];
+    try {
+      cleanInput(...todo[0]!);
+    } catch (error) {
+      throw new UsageError((error as Error).message);
+    }
   } else if (positionals.length === 0 && mock) {
     todo = MOCK_HANDLES.map((h) => ['instagram', h]);
   } else {
