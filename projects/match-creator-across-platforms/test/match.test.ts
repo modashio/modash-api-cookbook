@@ -308,7 +308,7 @@ describe('matching', () => {
     assert.deepEqual(r.candidates.map((c) => c.userId), ['UCbea']);
   });
 
-  it('counts the starting account as listing its email when the search leaves it out', async () => {
+  it('treats an email as shared when the search names another account on the starting platform', async () => {
     const saved = {
       ...amy,
       'GET instagram/profile/1/report': report('1', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
@@ -549,6 +549,55 @@ describe('matching', () => {
     const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok?.email_agrees, true);
     assert.equal(r.accounts.instagram?.email_agrees, true);
+  });
+
+  it('marks no email agreement on an address another account lists on a platform matched later', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
+        { type: 'tiktok', value: 'https://www.tiktok.com/share/user/8' },
+        { type: 'email', value: 'me@example.com' },
+        { type: 'email', value: 'team@example.com' },
+      ]),
+      'GET tiktok/profile/8/report': report('8', { username: 'amy' }, [
+        { type: 'instagram', value: 'https://www.instagram.com/amy' },
+        { type: 'email', value: 'team@example.com' },
+      ]),
+      'POST email-search {"emails":["me@example.com","team@example.com"]}': {
+        matchedEmails: [
+          { email: 'me@example.com', users: [{ platform: 'youtube', userId: 'UC1', username: 'amy' }] },
+          { email: 'team@example.com', users: [{ platform: 'youtube', userId: 'UC2', username: 'bea' }] },
+        ],
+      },
+      'GET youtube/users?query=amy': { users: [{ userId: 'UC1', handle: '@amy' }] },
+      'GET youtube/profile/UC1/report': report('UC1', { handle: '@amy' }, [
+        { type: 'instagram', value: 'https://www.instagram.com/amy' },
+      ]),
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.youtube?.userId, 'UC1');
+    assert.equal(r.accounts.tiktok?.email_agrees, undefined);
+    assert.equal(r.accounts.instagram?.email_agrees, undefined);
+  });
+
+  it('takes the follower count of an email match from a report the tool holds', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
+        { type: 'tiktok', value: 'https://www.tiktok.com/share/user/8' },
+        { type: 'email', value: 'amy@example.com' },
+      ]),
+      'GET tiktok/profile/8/report': report('8', { username: 'amy', followers: 250000 }, [
+        { type: 'email', value: 'amy@example.com' },
+      ]),
+      'POST email-search {"emails":["amy@example.com"]}': {
+        matchedEmails: [
+          { email: 'amy@example.com', users: [{ platform: 'tiktok', userId: '8', username: 'amy', followers: 1000 }] },
+        ],
+      },
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.tiktok?.followers, 250000);
   });
 
   it('marks email agreement between two same-handle matches when the start lists no email', async () => {
