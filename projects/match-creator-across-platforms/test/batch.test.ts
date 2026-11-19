@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import { runBatch } from '../src/batch.js';
+import { parseRows, runBatch } from '../src/batch.js';
 import type { MatchResult } from '../src/creator-match.js';
 import { Matcher } from '../src/match.js';
 import { CreditBudgetExceededError } from '../src/modash/errors.js';
@@ -22,7 +22,8 @@ const recorded = (path: string) =>
       return `${result.input.handle} ${result.errors.length === 0 ? 'finished' : 'failed'}`;
     });
 
-const rows = (...handles: string[]): [string, string][] => handles.map((handle) => ['instagram', handle]);
+const rows = (...handles: string[]) => parseRows(handles.map((handle) => ['instagram', handle]));
+const resume = (...handles: string[]) => ({ kind: 'resume' as const, toRun: new Set(handles.map((h) => `instagram:${h}`)) });
 
 describe('batch run', () => {
   let dir: string;
@@ -40,7 +41,7 @@ describe('batch run', () => {
       rows: rows('amy', 'bea'),
       matcher: new Matcher(memoryReads({})),
       resultsPath,
-      kind: 'csv',
+      mode: resume('amy', 'bea'),
       onResult: (result) => matched.push(result.input.handle),
     });
     assert.deepEqual(outcome, { ran: 1 });
@@ -58,8 +59,25 @@ describe('batch run', () => {
         return reads.lookupAccounts(platform, query);
       },
     });
-    const outcome = await runBatch({ rows: rows('amy', 'bea', 'cat'), matcher, resultsPath, kind: 'csv' });
+    const outcome = await runBatch({ rows: rows('amy', 'bea', 'cat'), matcher, resultsPath, mode: resume('amy', 'bea', 'cat') });
     assert.deepEqual(outcome, { ran: 1, stoppedAt: { handle: 'bea', error: stop } });
     assert.deepEqual(recorded(resultsPath), ['amy finished']);
+  });
+
+  it('reports a skipped row between the results, where the run reaches it', async () => {
+    const seen: string[] = [];
+    await runBatch({
+      rows: parseRows([
+        ['instagram', 'amy'],
+        ['facebook', 'x'],
+        ['instagram', 'bea'],
+      ]),
+      matcher: new Matcher(memoryReads({})),
+      resultsPath,
+      mode: { kind: 'fresh' },
+      onResult: (result) => seen.push(result.input.handle),
+      onSkip: (rowNumber) => seen.push(`row ${rowNumber}`),
+    });
+    assert.deepEqual(seen, ['amy', 'row 2', 'bea']);
   });
 });

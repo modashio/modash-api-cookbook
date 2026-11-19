@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { cleanInput, runBatch } from './batch.js';
+import { type CreatorRow, parseRows, runBatch } from './batch.js';
 import { loadConfig } from './config.js';
 import { PLATFORMS } from './contacts.js';
 import type { MatchResult } from './creator-match.js';
@@ -11,6 +11,7 @@ import { liveTransport, ModashClient } from './modash/client.js';
 import { MOCK_HANDLES, mockTransport } from './modash/mock.js';
 import { modashReads } from './modash/reads.js';
 import { round2 } from './numbers.js';
+import { creatorKey, type ResultsMode } from './results.js';
 
 export interface RunOptions {
   argv: string[];
@@ -73,21 +74,23 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   const budget = values['max-credits'] === undefined ? config.creditBudget : Number(values['max-credits']);
   if (!(budget > 0)) throw new UsageError('--max-credits must be a number above 0');
 
-  let todo: [string, string][];
+  let todo: CreatorRow[];
   if (values.csv !== undefined) {
-    todo = readCsv(values.csv);
+    todo = parseRows(readCsv(values.csv));
   } else if (positionals.length === 2) {
-    todo = [[positionals[0]!, positionals[1]!]];
-    try {
-      cleanInput(...todo[0]!);
-    } catch (error) {
-      throw new UsageError((error as Error).message);
-    }
+    todo = parseRows([[positionals[0]!, positionals[1]!]]);
+    if (todo[0]!.kind === 'skipped') throw new UsageError(todo[0]!.reason);
   } else if (positionals.length === 0 && mock) {
-    todo = MOCK_HANDLES.map((h) => ['instagram', h]);
+    todo = parseRows(MOCK_HANDLES.map((h) => ['instagram', h]));
   } else {
     throw new UsageError(USAGE);
   }
+  // Mock mode starts the file over, a CSV resumes it, and a single handle replaces its own line.
+  const mode: ResultsMode = mock
+    ? { kind: 'fresh' }
+    : values.csv !== undefined
+      ? { kind: 'resume', toRun: new Set(todo.flatMap((r) => (r.kind === 'creator' ? creatorKey(r.platform, r.handle) : []))) }
+      : { kind: 'replace' };
 
   const outDir = join(cwd, 'output');
   const resultsFile = join(outDir, mock ? 'mock-results.jsonl' : 'results.jsonl');
@@ -101,7 +104,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
     rows: todo,
     matcher,
     resultsPath: resultsFile,
-    kind: mock ? 'mock' : values.csv !== undefined ? 'csv' : 'single',
+    mode,
     onResult: (result) => print(`${summary(result, mock)}\n`),
     onSkip: (rowNumber, reason) => print(`row ${rowNumber} skipped: ${reason}`),
   });

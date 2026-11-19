@@ -4,13 +4,16 @@ import type { Matcher } from './match.js';
 import { type CreditBudgetExceededError, type ModashApiError, stopsTheRun } from './modash/errors.js';
 import { creatorKey, openResults, type ResultsMode } from './results.js';
 
-export type BatchKind = 'mock' | 'csv' | 'single';
+/** One row of the creator list, read once: a creator to match, or a row that could not be read and why. */
+export type CreatorRow =
+  | { kind: 'creator'; platform: Platform; handle: string }
+  | { kind: 'skipped'; rowNumber: number; reason: string };
 
 export interface BatchOptions {
-  rows: [string, string][];
+  rows: CreatorRow[];
   matcher: Matcher;
   resultsPath: string;
-  kind: BatchKind;
+  mode: ResultsMode;
   onResult?: (result: MatchResult) => void;
   onSkip?: (rowNumber: number, reason: string) => void;
 }
@@ -20,20 +23,18 @@ export interface BatchOutcome {
   stoppedAt?: { handle: string; error: CreditBudgetExceededError | ModashApiError };
 }
 
-export async function runBatch({ rows, matcher, resultsPath, kind, onResult, onSkip }: BatchOptions): Promise<BatchOutcome> {
-  const results = openResults(resultsPath, resultsMode(kind, rows));
+/** Matches the creators in list order. A skipped row is reported where the run reaches it, between the results. */
+export async function runBatch({ rows, matcher, resultsPath, mode, onResult, onSkip }: BatchOptions): Promise<BatchOutcome> {
+  const results = openResults(resultsPath, mode);
   const done = new Set(results.finished);
 
   let ran = 0;
-  for (const [index, [rawPlatform, rawHandle]] of rows.entries()) {
-    let platform: Platform;
-    let handle: string;
-    try {
-      [platform, handle] = cleanInput(rawPlatform, rawHandle);
-    } catch (error) {
-      onSkip?.(index + 1, (error as Error).message);
+  for (const row of rows) {
+    if (row.kind === 'skipped') {
+      onSkip?.(row.rowNumber, row.reason);
       continue;
     }
+    const { platform, handle } = row;
     const key = creatorKey(platform, handle);
     if (done.has(key)) continue;
     done.add(key);
@@ -52,21 +53,19 @@ export async function runBatch({ rows, matcher, resultsPath, kind, onResult, onS
   return { ran };
 }
 
-function resultsMode(kind: BatchKind, rows: [string, string][]): ResultsMode {
-  if (kind === 'mock') return { kind: 'fresh' };
-  if (kind === 'csv') return { kind: 'resume', toRun: new Set(rows.flatMap(([p, h]) => creatorKeyOf(p, h) ?? [])) };
-  return { kind: 'replace' };
+/** Reads each raw platform and handle pair once. Row numbers count from 1. */
+export function parseRows(rows: [string, string][]): CreatorRow[] {
+  return rows.map(([platform, handle], index): CreatorRow => {
+    try {
+      const [p, h] = cleanInput(platform, handle);
+      return { kind: 'creator', platform: p, handle: h };
+    } catch (error) {
+      return { kind: 'skipped', rowNumber: index + 1, reason: (error as Error).message };
+    }
+  });
 }
 
-function creatorKeyOf(platform: string | undefined, handle: string | undefined): string | undefined {
-  try {
-    return creatorKey(...cleanInput(platform, handle));
-  } catch {
-    return undefined;
-  }
-}
-
-export function cleanInput(platform: string | undefined, handle: string | undefined): [Platform, string] {
+function cleanInput(platform: string | undefined, handle: string | undefined): [Platform, string] {
   const p = (platform ?? '').trim().toLowerCase();
   if (!isPlatform(p)) throw new Error(`platform must be one of ${PLATFORMS.join(', ')}, got "${platform ?? ''}"`);
   const h = handleFrom(p, (handle ?? '').trim());
