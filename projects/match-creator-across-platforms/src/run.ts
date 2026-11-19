@@ -69,17 +69,29 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
       : new ModashClient(liveTransport(source.apiToken), { budget });
   const matcher = new Matcher(modashReads(client, mock ? undefined : join(outDir, 'reports')));
 
-  const { ranCount, stoppedAt } = await runBatch({
-    creators,
-    matcher,
-    resultsPath: resultsFile,
-    mode,
-    onResult: (result) => print(`${summary(result, mock)}\n`),
-  });
+  // Ctrl-C ends the run at once, so say what it spent before leaving.
+  const onInterrupt = () => {
+    print(`\nStopped by Ctrl-C. Credits this run: ${round2(client.spent)}. Finished creators are in ${shown}.`);
+    process.exit(130);
+  };
+  process.once('SIGINT', onInterrupt);
+  let outcome;
+  try {
+    outcome = await runBatch({
+      creators,
+      matcher,
+      resultsPath: resultsFile,
+      mode,
+      onResult: (result) => print(`${summary(result, mock)}\n`),
+    });
+  } finally {
+    process.off('SIGINT', onInterrupt);
+  }
+  const { ranCount, stoppedAt } = outcome;
   if (stoppedAt) {
     print(`Stopped at @${stoppedAt.handle}: ${stoppedAt.error.message}`);
     print(`Credits this run: ${round2(client.spent)}`);
-    print(`Finished creators are in ${shown}. Run the same command again to carry on.`);
+    print(`Finished creators are in ${shown}. Fix the cause above, then run the same command again to carry on.`);
     return 1;
   }
 

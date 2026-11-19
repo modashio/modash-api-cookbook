@@ -15,7 +15,8 @@ npm run dev
 ```
 
 Mock mode needs no token and spends nothing. It answers from two invented creators written in the
-shape the API returns (`fixtures/demo-responses.json`), and prints:
+shape the API returns (`fixtures/demo-responses.json`). It starts its results file over on every
+run, so a second `npm run dev` prints both creators again. It prints:
 
 ```
 instagram @example_baker  (3 credits on a live run)
@@ -43,6 +44,8 @@ cp .env.example .env        # then uncomment MODASH_API_TOKEN in .env and set it
 npm run match-creator -- instagram example_baker
 ```
 
+Setting `MODASH_API_TOKEN` in your shell works too.
+
 The handle can also be a profile URL that shows it, such as `https://www.instagram.com/example_baker/`.
 A URL with only an id, such as `youtube.com/channel/UC...` or `tiktok.com/share/user/...`, is
 rejected: use the handle instead.
@@ -56,12 +59,12 @@ npm run match-csv -- handles.csv --max-credits 500
 | Variable | What it does |
 | --- | --- |
 | `MODASH_API_TOKEN` | Your token. A live run needs it. Mock mode (`npm run dev`, or `--mock`) does not. |
-| `MODASH_CREDIT_BUDGET` | Most credits one run may spend, 50 by default. `--max-credits` overrides it for one run. |
+| `MODASH_CREDIT_BUDGET` | Most credits one run may spend, 50 by default. `--max-credits` overrides it for one run. Either must be above 0. |
 
 - **Budget.** A run stops before any call that could take it over the budget. A 100-creator CSV usually needs 100 to 300, more when profiles link several accounts on one platform.
 - **Checks first.** Before it spends anything, the tool reads every row. If a row has an unknown platform or a value that is not a handle or profile link, the run does not start: it lists each bad row with its line number, so you can fix the file and run again.
 - **Results** go to `output/results.jsonl`, one line per creator. Handles are stored in lower case.
-- **Resume.** If a CSV run stops, run the same command again. Creators already finished, including ones not found on their starting platform, are skipped; creators that hit an error are tried again. A single-creator run replaces that creator's line and leaves the rest alone.
+- **Resume.** If a CSV run stops, run the same command again. Creators already finished, including ones not found on their starting platform, are skipped; creators that hit an error are tried again. A single-creator run replaces that creator's line and leaves the rest alone. A creator the budget stops partway gets no line: its reports are saved, so the rerun does not pay for them again. Ctrl-C stops a run and prints what it spent.
 - **Saved reports.** Every report is saved in `output/reports/`, so a rerun never pays for the same report twice. They do not expire: delete the folder to pull fresh data. The reports hold creators' contact emails, so do not commit, share or screen-record this folder.
 - **Errors.** An invalid token (`api_token_invalid`) or an empty balance (`not_enough_credits`) stops the run with the API's message. Any other failed call, such as a report for an account that no longer exists, is written to that creator's `errors` and the run goes on.
 
@@ -87,6 +90,9 @@ which matches to accept.
 }
 ```
 
+`credits` is what this run spent on the creator, not what the creator costs. A rerun that reads
+saved reports writes 0, so add up a run's credits at the time, not from this field later.
+
 The kinds of evidence, strongest first:
 
 | `how` | What it means | Suggested rule |
@@ -103,7 +109,7 @@ that also links back), `, shared by several accounts` (an email that another acc
 this platform or on one where the creator is already matched), `, another email names a different account` (two emails point at two accounts on one
 platform), or read `same handle, report failed`.
 `emailAgrees: true` on two matched accounts means both list the same email, and no other account
-is known to list it. It is set only on accounts whose report the tool holds. It is a second piece
+is known to list it. The terminal shows it as `+ email agrees`. It is set only on accounts whose report the tool holds. It is a second piece
 of evidence only when `how` names another reason: on `email (...)` or `same handle, confirmed by
 shared email` it is that same email.
 
