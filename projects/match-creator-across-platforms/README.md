@@ -55,8 +55,7 @@ npm run match -- --csv handles.csv --max-credits 500
 
 | Variable | What it does |
 | --- | --- |
-| `MODASH_API_TOKEN` | Your token. Without it the tool runs in mock mode and will not take your own creators. |
-| `MODASH_MOCK` | `true` answers from the fixtures even with a token set. |
+| `MODASH_API_TOKEN` | Your token. A live run needs it. Mock mode (`npm run dev`, or `--mock`) does not. |
 | `MODASH_CREDIT_BUDGET` | Most credits one run may spend, 50 by default. `--max-credits` overrides it for one run. |
 
 - **Budget.** A run stops before any call that could take it over the budget. A 100-creator CSV usually needs 100 to 300, more when profiles link several accounts on one platform.

@@ -695,13 +695,34 @@ describe('command line', () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   it('runs mock mode with no token', async () => {
-    assert.equal(await run({ argv: [], env: {}, cwd: dir, print }), 0);
+    assert.equal(await run({ argv: ['--mock'], env: {}, cwd: dir, print }), 0);
     assert.match(lines.join('\n'), /mock mode/);
     assert.equal(readFileSync(join(dir, 'output', 'mock-results.jsonl'), 'utf8').trim().split('\n').length, 2);
   });
 
   it('asks for a token before running on real creators', async () => {
     await assert.rejects(run({ argv: ['instagram', 'someone'], env: {}, cwd: dir, print }), /MODASH_API_TOKEN/);
+  });
+
+  it('runs live without --mock, so no token asks for one', async () => {
+    await assert.rejects(run({ argv: [], env: {}, cwd: dir, print }), /MODASH_API_TOKEN/);
+  });
+
+  it('says what input is missing', async () => {
+    await assert.rejects(run({ argv: [], env: { MODASH_API_TOKEN: 'abc' }, cwd: dir, print }), /Give a platform and a handle, or --csv <file>/);
+    await assert.rejects(run({ argv: ['--mock', 'instagram'], env: {}, cwd: dir, print }), /got only one value/);
+    await assert.rejects(run({ argv: ['--mock', '--csv', 'x.csv', 'instagram', 'a'], env: {}, cwd: dir, print }), /not both/);
+  });
+
+  it('refuses a creator mock mode has no data for, with or without a token', async () => {
+    for (const env of [{}, { MODASH_API_TOKEN: 'abc' }]) {
+      await assert.rejects(run({ argv: ['--mock', 'instagram', 'bob'], env, cwd: dir, print }), /mock mode knows only/);
+    }
+  });
+
+  it('applies the credit budget in mock mode too', async () => {
+    assert.equal(await run({ argv: ['--mock', '--max-credits', '2'], env: {}, cwd: dir, print }), 1);
+    assert.match(lines.join('\n'), /Stopped at @example_baker/);
   });
 
   it('runs a CSV in mock mode and skips bad rows', async () => {
@@ -723,12 +744,6 @@ describe('command line', () => {
     await assert.rejects(run({ argv: ['--demo'], env: {}, print: () => {} }), /Usage/);
   });
 
-  it('refuses real handles when MODASH_MOCK is set', async () => {
-    await assert.rejects(
-      run({ argv: ['instagram', 'bob'], env: { MODASH_MOCK: 'true', MODASH_API_TOKEN: 'abc' }, print: () => {} }),
-      /MODASH_MOCK is true/,
-    );
-  });
 
   it('keeps the first good result per creator when a run resumes', () => {
     const file = join(dir, 'results.jsonl');

@@ -25,7 +25,7 @@ const USAGE = `Usage:
   npm run match -- instagram example_baker      one creator (a handle or a profile URL)
   npm run match -- --csv handles.csv            a list, with the columns platform and handle
 Options:
-  --mock              answer from the invented fixtures even with a token set
+  --mock              answer from the invented fixtures: only instagram ${MOCK_HANDLES.join(' and ')}, no token, no network
   --max-credits <n>   stop before this run could spend more than n credits (default MODASH_CREDIT_BUDGET, 50)`;
 
 export class UsageError extends Error {}
@@ -58,17 +58,12 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   } catch (error) {
     throw new UsageError((error as Error).message);
   }
-  const mock = values.mock || config.mock;
-  const ownInput = values.csv !== undefined || positionals.length > 0;
-  if (mock && !values.mock && ownInput) {
-    throw new UsageError(
-      config.mockByDefault
-        ? 'Set MODASH_API_TOKEN (in .env or your shell) to run on your own creators. Without a token, run npm run dev.'
-        : `MODASH_MOCK is true, so only the invented creators (${MOCK_HANDLES.join(', ')}) can run. Unset it to run live.`,
-    );
+  const mock = values.mock;
+  if (!mock && !config.apiToken) {
+    throw new UsageError('Set MODASH_API_TOKEN (in .env or your shell) to run live. To try it without a token, run npm run dev.');
   }
-  if (config.mockByDefault && !values.mock) {
-    print('No MODASH_API_TOKEN set, so this runs in mock mode on invented creators. Nothing is spent.\n');
+  if (values.csv !== undefined && positionals.length > 0) {
+    throw new UsageError(`Give a platform and a handle, or --csv, not both.\n\n${USAGE}`);
   }
 
   const budget = values['max-credits'] === undefined ? config.creditBudget : Number(values['max-credits']);
@@ -79,12 +74,14 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
     todo = parseRows(readCsv(values.csv));
   } else if (positionals.length === 2) {
     todo = parseRows([[positionals[0]!, positionals[1]!]]);
-    if (todo[0]!.kind === 'skipped') throw new UsageError(todo[0]!.reason);
   } else if (positionals.length === 0 && mock) {
     todo = parseRows(MOCK_HANDLES.map((h) => ['instagram', h]));
   } else {
-    throw new UsageError(USAGE);
+    const problem = positionals.length === 0 ? 'Give a platform and a handle, or --csv <file>.' : `Expected a platform and a handle, got ${positionals.length === 1 ? 'only one value' : `${positionals.length} values`}.`;
+    throw new UsageError(`${problem}\n\n${USAGE}`);
   }
+  if (mock) todo = todo.map(onlyMockCreators);
+  if (values.csv === undefined && todo[0]?.kind === 'skipped') throw new UsageError(todo[0].reason);
   // Mock mode starts the file over, a CSV resumes it, and a single handle replaces its own line.
   const mode: ResultsMode = mock
     ? { kind: 'fresh' }
@@ -96,7 +93,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   const resultsFile = join(outDir, mock ? 'mock-results.jsonl' : 'results.jsonl');
   const shown = relative(cwd, resultsFile);
   const client = mock
-    ? new ModashClient(mockTransport(), { pauseMs: 0 })
+    ? new ModashClient(mockTransport(), { pauseMs: 0, budget })
     : new ModashClient(liveTransport(config.apiToken!), { budget });
   const matcher = new Matcher(modashReads(client, mock ? undefined : join(outDir, 'reports')));
 
@@ -120,6 +117,15 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   else if (mock) print(`Results in ${shown}. This was mock mode, so nothing was spent; a live run of the same creators costs ${total} credits.`);
   else print(`Results in ${shown}. Credits this run: ${total}`);
   return 0;
+}
+
+// Mock mode answers only for the invented creators, so any other row is skipped instead of failing with a 404.
+function onlyMockCreators(row: CreatorRow, index: number): CreatorRow {
+  if (row.kind === 'skipped') return row;
+  const known = row.platform === 'instagram' && (MOCK_HANDLES as readonly string[]).includes(row.handle.toLowerCase());
+  return known
+    ? row
+    : { kind: 'skipped', rowNumber: index + 1, reason: `mock mode knows only instagram ${MOCK_HANDLES.join(' and ')}, got ${row.platform} ${row.handle}` };
 }
 
 export function summary(result: MatchResult, mock = false): string {
