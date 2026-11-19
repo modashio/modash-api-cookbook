@@ -9,7 +9,8 @@ import { type MatchResult, Matcher } from '../src/match.js';
 import { ModashClient, type Transport } from '../src/modash/client.js';
 import { CreditBudgetExceededError, ModashApiError } from '../src/modash/errors.js';
 import { fixtureKey, mockTransport } from '../src/modash/mock.js';
-import { keepFinished, parseCsv, run } from '../src/run.js';
+import { openResults } from '../src/results.js';
+import { parseCsv, run } from '../src/run.js';
 
 const report = (userId: string, profile: object, contacts: object[]) => ({
   error: false,
@@ -600,6 +601,19 @@ describe('matching', () => {
     assert.equal(r.accounts.tiktok?.followers, 250000);
   });
 
+  it('does not confirm a same-handle account by email when email search failed', async () => {
+    const saved = {
+      ...amy,
+      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
+      'GET tiktok/users?query=amy': { users: [{ userId: '9', username: 'amy' }] },
+      'GET tiktok/profile/9/report': report('9', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
+    };
+    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    assert.equal(r.accounts.tiktok, undefined);
+    assert.deepEqual(r.candidates.map((c) => c.how), ['same handle, unconfirmed']);
+    assert.ok(r.errors.some((e) => e.startsWith('email search')));
+  });
+
   it('marks email agreement between two same-handle matches when the start lists no email', async () => {
     const linksBack = [
       { type: 'email', value: 'amy@example.com' },
@@ -724,8 +738,24 @@ describe('command line', () => {
     const line = (handle: string, errors: string[], credits: number) =>
       JSON.stringify({ input: { platform: 'instagram', handle }, accounts: {}, candidates: [], missing: [], credits, errors });
     writeFileSync(file, [line('amy', [], 1), line('bea', ['report failed'], 0), line('Amy', [], 2), '{"cut off'].join('\n'));
-    assert.deepEqual(keepFinished(file, new Set(['instagram:amy', 'instagram:bea'])), ['instagram:amy']);
+    const results = openResults(file, { kind: 'resume', toRun: new Set(['instagram:amy', 'instagram:bea']) });
+    assert.deepEqual([...results.finished], ['instagram:amy']);
     assert.equal(readFileSync(file, 'utf8'), `${line('amy', [], 1)}\n`);
+  });
+
+  it('replaces only the line of the one creator a single-handle run records', () => {
+    const file = join(dir, 'results.jsonl');
+    const result = (handle: string, credits: number): MatchResult => ({
+      input: { platform: 'instagram', handle },
+      accounts: {},
+      candidates: [],
+      missing: [],
+      credits,
+      errors: [],
+    });
+    writeFileSync(file, `${JSON.stringify(result('amy', 1))}\n${JSON.stringify(result('bea', 1))}\n`);
+    openResults(file, { kind: 'replace' }).record(result('Amy', 2));
+    assert.equal(readFileSync(file, 'utf8'), `${JSON.stringify(result('bea', 1))}\n${JSON.stringify(result('Amy', 2))}\n`);
   });
 
   it('keeps the failed result of a creator who is not in this run', () => {
@@ -733,7 +763,8 @@ describe('command line', () => {
     const line = (handle: string, errors: string[]) =>
       JSON.stringify({ input: { platform: 'instagram', handle }, accounts: {}, candidates: [], missing: [], credits: 0, errors });
     writeFileSync(file, [line('amy', []), line('bea', ['report failed'])].join('\n'));
-    assert.deepEqual(keepFinished(file, new Set(['instagram:amy'])), ['instagram:amy']);
+    const results = openResults(file, { kind: 'resume', toRun: new Set(['instagram:amy']) });
+    assert.deepEqual([...results.finished], ['instagram:amy']);
     assert.equal(readFileSync(file, 'utf8'), `${line('amy', [])}\n${line('bea', ['report failed'])}\n`);
   });
 

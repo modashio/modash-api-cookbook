@@ -1,5 +1,6 @@
-import { groupBy, partition, remove, uniq, uniqBy } from 'lodash-es';
+import { groupBy, partition, remove, uniqBy } from 'lodash-es';
 
+import { EmailEvidence, type EmailListing } from './email-evidence.js';
 import { emailsIn, handleFrom, idFrom, isPlatform, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
 import { getReport, lookupUsers, searchEmails } from './modash/api.js';
 import type { ModashClient } from './modash/client.js';
@@ -42,28 +43,7 @@ interface Start {
   /** Every name the account answers to, lower case, the input handle first. */
   names: Set<string>;
   report: ReportProfile;
-  /** Emails on the starting report and on accounts confirmed both ways. */
-  emails: Set<string>;
-  /** Which accounts email search tied to each email. */
-  emailHits: EmailHit[];
-}
-
-type EmailHit = { email: string; platform: Platform; userId: string };
-
-// An address belongs to more than one person when two accounts on one platform list it, or when an account
-// other than the creator's lists it on a platform where the creator is matched. Then it proves nothing.
-function sharedEmailsOf(hits: EmailHit[], accounts: MatchResult['accounts']): Set<string> {
-  const listedByOthers = (emailHits: EmailHit[]) =>
-    Object.entries(groupBy(emailHits, 'platform')).some(([platform, group]) => {
-      const listers = uniq(group.map((hit) => hit.userId));
-      const matched = isPlatform(platform) ? accounts[platform]?.userId : undefined;
-      return listers.length > 1 || (matched !== undefined && listers[0] !== matched);
-    });
-  return new Set(
-    Object.entries(groupBy(hits, 'email'))
-      .filter(([, emailHits]) => listedByOthers(emailHits))
-      .map(([email]) => email),
-  );
+  emails: EmailEvidence;
 }
 
 function describe(error: unknown): string {
@@ -159,13 +139,14 @@ export class Matcher {
     const report = await this.#tryReport(platform, me.userId);
     if (!report) return undefined;
     account.followers = report.profile?.followers ?? account.followers;
+    const emails = new EmailEvidence();
+    emails.claim(emailsIn(report));
     return {
       platform,
       userId: me.userId,
       names: new Set([handle.toLowerCase(), ...namesOf(me), ...namesOf(report.profile)]),
       report,
-      emails: emailsIn(report),
-      emailHits: [],
+      emails,
     };
   }
 
@@ -187,7 +168,7 @@ export class Matcher {
       );
       if (match) {
         result.accounts[other] = { ...match.account, how: 'confirmed both ways' };
-        for (const email of emailsIn(match.report)) start.emails.add(email);
+        start.emails.claim(emailsIn(match.report));
       }
       for (const { account } of alsoConfirmed) {
         this.#suggest(result, { platform: other, ...account, how: 'confirmed both ways, second link' });
@@ -218,8 +199,9 @@ export class Matcher {
   async #matchByEmail(start: Start, result: MatchResult): Promise<void> {
     const { accounts } = result;
     const missing = PLATFORMS.filter((p) => !accounts[p]);
-    if (missing.length === 0 || start.emails.size === 0) return;
-    const data = await this.#safe('email search', () => searchEmails(this.client, [...start.emails].sort()));
+    const claimed = start.emails.claimed;
+    if (missing.length === 0 || claimed.length === 0) return;
+    const data = await this.#safe('email search', () => searchEmails(this.client, claimed));
 
     const rows = uniqBy(
       (data?.matchedEmails ?? []).flatMap(({ email, users }) =>
@@ -231,9 +213,8 @@ export class Matcher {
       ),
       (row) => `${row.email}:${row.platform}:${row.userId}`,
     );
-    start.emailHits = rows;
-    const sharedEmails = sharedEmailsOf(rows, accounts);
-    for (const email of sharedEmails) start.emails.delete(email);
+    start.emails.recordSearch(data && rows);
+    const sharedEmails = start.emails.shared(accounts);
     const [sharedRows, ownRows] = partition(rows, (row) => sharedEmails.has(row.email));
     const byPlatform = groupBy(
       ownRows.filter((row) => missing.includes(row.platform)),
@@ -258,16 +239,13 @@ export class Matcher {
 
   /** An email that matched accounts on two platforms both list, and no other account is known to list, is a second piece of evidence for both. */
   #markEmailAgreement(start: Start, { accounts }: MatchResult): void {
-    const shared = sharedEmailsOf(start.emailHits, accounts);
-    const listings = this.#emailsOfFound(accounts).filter((row) => !shared.has(row.email));
-    for (const group of Object.values(groupBy(listings, 'email'))) {
-      if (uniqBy(group, 'platform').length < 2) continue;
-      for (const { platform } of group) accounts[platform]!.email_agrees = true;
+    for (const platform of start.emails.agreeing(this.#emailsOfFound(accounts), accounts)) {
+      accounts[platform]!.email_agrees = true;
     }
   }
 
   /** The emails each matched account lists, for the accounts whose report the tool holds. */
-  #emailsOfFound(accounts: MatchResult['accounts']): { email: string; platform: Platform; userId: string }[] {
+  #emailsOfFound(accounts: MatchResult['accounts']): EmailListing[] {
     return PLATFORMS.flatMap((platform) => {
       const account = accounts[platform];
       const report = account && this.#reports.get(`${platform}:${account.userId}`);
@@ -285,10 +263,7 @@ export class Matcher {
         const back = await this.#tryReport(other, row.userId);
         const followers = back?.profile?.followers ?? row.followers ?? null;
         const base = { platform: other, userId: row.userId, username: nameOf(row), followers };
-        // An email that search tied to a different account on this platform is listed by two accounts there.
-        const tiedToOther = (email: string) =>
-          start.emailHits.some((hit) => hit.email === email && hit.platform === other && hit.userId !== row.userId);
-        const shared = back ? [...emailsIn(back)].filter((e) => start.emails.has(e) && !tiedToOther(e)).sort() : [];
+        const shared = back ? start.emails.confirming(other, row.userId, emailsIn(back), result.accounts) : [];
         if (back && Matcher.pointsBack(back, start.platform, start.names, start.userId)) {
           this.#accept(result, { ...base, how: 'same handle, confirmed by its profile link back' });
         } else if (shared.length > 0) {

@@ -270,7 +270,9 @@ platform, both go to `candidates`.
 Looking up the same handle on the missing platform is free. The tool tries every name the starting
 account answers to, so a renamed YouTube channel is tried under both names. Checking what it finds
 costs 1 credit for its report. What it finds becomes a match only when its own report links back, or lists an email that
-the starting account or an account confirmed both ways also lists. Never match on a display name.
+the starting account or an account confirmed both ways also lists, and that no other account lists on
+its platform or on a platform where the creator is matched. When email search failed, no email confirms, since nothing is known about who else lists it.
+Never match on a display name.
 
 `example_techreviews` has a TikTok with the same handle. Its profile links to nothing and lists no
 email, so it stays a candidate:
@@ -317,9 +319,11 @@ Follower counts come from the report when the tool has one.
 | Path | What it is |
 | --- | --- |
 | `src/match.ts` | The method: the five steps above, in `Matcher` |
+| `src/email-evidence.ts` | What the emails prove: which are shared, which confirm an account, which agree |
 | `src/contacts.ts` | Reading handles and ids out of profile links |
 | `src/modash/` | The HTTP layer: client with budget and retries, response schemas, errors, mock transport |
-| `src/run.ts`, `src/cli.ts` | The command line: arguments, CSV, resume, output |
+| `src/run.ts`, `src/cli.ts` | The command line: arguments, CSV, output |
+| `src/results.ts` | The results file: which creators are finished, resume, one line per creator |
 | `fixtures/demo-responses.json` | What mock mode answers from: invented creators, the API's real response shape |
 | `sample-output/` | The two records mock mode produces |
 | `handles.example.csv` | The CSV format for a batch run |

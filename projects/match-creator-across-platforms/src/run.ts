@@ -1,8 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
-
-import { sortBy, uniqBy } from 'lodash-es';
 
 import { loadConfig } from './config.js';
 import { handleFrom, isPlatform, PLATFORMS, type Platform } from './contacts.js';
@@ -12,6 +10,7 @@ import { CreditBudgetExceededError, ModashApiError } from './modash/errors.js';
 import { MOCK_HANDLES, mockTransport } from './modash/mock.js';
 import { reportProfileSchema, type ReportProfile } from './modash/responses.js';
 import { round2 } from './numbers.js';
+import { creatorKey, openResults, type ResultsMode, writeAtomic } from './results.js';
 
 export interface RunOptions {
   argv: string[];
@@ -98,13 +97,8 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
     : new ModashClient(liveTransport(config.apiToken!), { budget });
   const matcher = new Matcher(client, mock ? undefined : fileCache(join(outDir, 'reports')));
 
-  const done = new Set<string>();
-  if (mock && existsSync(resultsFile)) {
-    unlinkSync(resultsFile);
-  } else if (values.csv !== undefined && existsSync(resultsFile)) {
-    const toRun = new Set(todo.flatMap(([p, h]) => creatorKeyOf(p, h) ?? []));
-    for (const key of keepFinished(resultsFile, toRun)) done.add(key);
-  }
+  const results = openResults(resultsFile, resultsMode(mock, values.csv !== undefined, todo));
+  const done = new Set(results.finished);
 
   let ran = 0;
   for (const [index, [rawPlatform, rawHandle]] of todo.entries()) {
@@ -132,14 +126,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
       }
       throw error;
     }
-    const line = JSON.stringify(result);
-    if (values.csv !== undefined || mock) {
-      mkdirSync(outDir, { recursive: true });
-      appendFileSync(resultsFile, `${line}\n`);
-    } else {
-      const others = existsSync(resultsFile) ? readResults(resultsFile).filter((r) => r.key !== key).map((r) => r.line) : [];
-      writeLines(resultsFile, [...others, line]);
-    }
+    results.record(result);
     print(`${summary(result, mock)}\n`);
     ran += 1;
   }
@@ -151,7 +138,11 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   return 0;
 }
 
-const creatorKey = (platform: Platform, handle: string) => `${platform}:${handle.toLowerCase()}`;
+function resultsMode(mock: boolean, csv: boolean, todo: [string, string][]): ResultsMode {
+  if (mock) return { kind: 'fresh' };
+  if (csv) return { kind: 'resume', toRun: new Set(todo.flatMap(([p, h]) => creatorKeyOf(p, h) ?? [])) };
+  return { kind: 'replace' };
+}
 
 function creatorKeyOf(platform: string | undefined, handle: string | undefined): string | undefined {
   try {
@@ -159,23 +150,6 @@ function creatorKeyOf(platform: string | undefined, handle: string | undefined):
   } catch {
     return undefined;
   }
-}
-
-/**
- * Rewrites a results file to one result per creator, the first good one when there is one. Failed results
- * of creators about to run again are dropped; other creators' lines stay. Returns the finished creators.
- */
-export function keepFinished(resultsFile: string, toRun: Set<string>): string[] {
-  const rows = readResults(resultsFile).filter((r) => !(r.failed && toRun.has(r.key)));
-  const kept = uniqBy(
-    sortBy(rows, (r) => r.failed),
-    'key',
-  );
-  writeLines(
-    resultsFile,
-    kept.map((r) => r.line),
-  );
-  return kept.filter((r) => !r.failed).map((r) => r.key);
 }
 
 export function cleanInput(platform: string | undefined, handle: string | undefined): [Platform, string] {
@@ -258,30 +232,6 @@ export function parseCsv(text: string): string[][] {
     rows.push(row);
   }
   return rows;
-}
-
-function readResults(path: string): { key: string; line: string; failed: boolean }[] {
-  const out = [];
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
-    try {
-      const r = JSON.parse(line) as MatchResult;
-      out.push({ key: `${r.input.platform}:${r.input.handle.toLowerCase()}`, line, failed: r.errors.length > 0 });
-    } catch {
-      // a line cut off by a crash
-    }
-  }
-  return out;
-}
-
-function writeAtomic(path: string, text: string): void {
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, path);
-}
-
-function writeLines(path: string, lines: string[]): void {
-  mkdirSync(join(path, '..'), { recursive: true });
-  writeAtomic(path, lines.map((l) => `${l}\n`).join(''));
 }
 
 function fileCache(dir: string): ReportCache {
