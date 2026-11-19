@@ -40,7 +40,7 @@ Node.js 22 or later.
 
 ```bash
 cp .env.example .env        # then uncomment MODASH_API_TOKEN in .env and set it
-npm run match -- instagram example_baker
+npm run match-creator -- instagram example_baker
 ```
 
 The handle can also be a profile URL that shows it, such as `https://www.instagram.com/example_baker/`.
@@ -50,7 +50,7 @@ rejected: use the handle instead.
 For a list, make a CSV with the columns `platform` and `handle` (see `handles.example.csv`):
 
 ```bash
-npm run match -- --csv handles.csv --max-credits 500
+npm run match-csv -- handles.csv --max-credits 500
 ```
 
 | Variable | What it does |

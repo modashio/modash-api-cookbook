@@ -8,8 +8,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tsx src/cli.ts --mock",
-    "match": "tsx src/cli.ts",
+    "dev": "tsx src/cli.ts match-csv --mock handles.example.csv",
+    "match-creator": "tsx src/cli.ts match-creator",
+    "match-csv": "tsx src/cli.ts match-csv",
     "typecheck": "tsgo --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "build": "tsgo --noEmit"

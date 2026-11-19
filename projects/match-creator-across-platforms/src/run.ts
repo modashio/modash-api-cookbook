@@ -21,12 +21,16 @@ export interface RunOptions {
 }
 
 const USAGE = `Usage:
-  npm run dev                                   mock mode: two invented creators, no token, no credits
-  npm run match -- instagram example_baker      one creator (a handle or a profile URL)
-  npm run match -- --csv handles.csv            a list, with the columns platform and handle
+  npm run dev                                    mock mode: the two invented creators in handles.example.csv
+  npm run match-creator -- <platform> <handle>   one creator; the handle can be a profile URL
+  npm run match-csv -- <file>                    a list with the columns platform and handle; run it again to resume
 Options:
-  --mock              answer from the invented fixtures: only instagram ${MOCK_HANDLES.join(' and ')}, no token, no network
-  --max-credits <n>   stop before this run could spend more than n credits (default MODASH_CREDIT_BUDGET, 50)`;
+  --mock              answer from the invented fixtures: only instagram ${MOCK_HANDLES.join(' and ')}, no token, no network (default: off)
+  --max-credits <n>   stop before this run could spend more than n credits (default: MODASH_CREDIT_BUDGET, or 50)
+  -h, --help          print this text`;
+
+const COMMANDS = ['match-creator', 'match-csv'] as const;
+type Command = (typeof COMMANDS)[number];
 
 export class UsageError extends Error {}
 
@@ -37,7 +41,6 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
       args: argv,
       allowPositionals: true,
       options: {
-        csv: { type: 'string' },
         mock: { type: 'boolean', default: false },
         'max-credits': { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false },
@@ -46,10 +49,20 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   } catch (error) {
     throw new UsageError(`${(error as Error).message}\n\n${USAGE}`);
   }
-  const { values, positionals } = parsed;
+  const { values } = parsed;
   if (values.help) {
     print(USAGE);
     return 0;
+  }
+  const [command, ...args] = parsed.positionals;
+  if (!(COMMANDS as readonly string[]).includes(command ?? '')) {
+    const problem = command === undefined ? 'Give a command.' : `Unknown command "${command}".`;
+    throw new UsageError(`${problem} Use ${COMMANDS.join(' or ')}.\n\n${USAGE}`);
+  }
+  const csv = (command as Command) === 'match-csv';
+  const expected = csv ? 'a file' : 'a platform and a handle';
+  if (args.length !== (csv ? 1 : 2)) {
+    throw new UsageError(`${command} takes ${expected}, got ${args.length === 0 ? 'nothing' : args.map((a) => `"${a}"`).join(' ')}.\n\n${USAGE}`);
   }
 
   let config;
@@ -62,30 +75,17 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   if (!mock && !config.apiToken) {
     throw new UsageError('Set MODASH_API_TOKEN (in .env or your shell) to run live. To try it without a token, run npm run dev.');
   }
-  if (values.csv !== undefined && positionals.length > 0) {
-    throw new UsageError(`Give a platform and a handle, or --csv, not both.\n\n${USAGE}`);
-  }
 
   const budget = values['max-credits'] === undefined ? config.creditBudget : Number(values['max-credits']);
   if (!(budget > 0)) throw new UsageError('--max-credits must be a number above 0');
 
-  let todo: CreatorRow[];
-  if (values.csv !== undefined) {
-    todo = parseRows(readCsv(values.csv));
-  } else if (positionals.length === 2) {
-    todo = parseRows([[positionals[0]!, positionals[1]!]]);
-  } else if (positionals.length === 0 && mock) {
-    todo = parseRows(MOCK_HANDLES.map((h) => ['instagram', h]));
-  } else {
-    const problem = positionals.length === 0 ? 'Give a platform and a handle, or --csv <file>.' : `Expected a platform and a handle, got ${positionals.length === 1 ? 'only one value' : `${positionals.length} values`}.`;
-    throw new UsageError(`${problem}\n\n${USAGE}`);
-  }
+  let todo = csv ? parseRows(readCsv(args[0]!)) : parseRows([[args[0]!, args[1]!]]);
   if (mock) todo = todo.map(onlyMockCreators);
-  if (values.csv === undefined && todo[0]?.kind === 'skipped') throw new UsageError(todo[0].reason);
+  if (!csv && todo[0]!.kind === 'skipped') throw new UsageError(todo[0]!.reason);
   // Mock mode starts the file over, a CSV resumes it, and a single handle replaces its own line.
   const mode: ResultsMode = mock
     ? { kind: 'fresh' }
-    : values.csv !== undefined
+    : csv
       ? { kind: 'resume', toRun: new Set(todo.flatMap((r) => (r.kind === 'creator' ? creatorKey(r.platform, r.handle) : []))) }
       : { kind: 'replace' };
 

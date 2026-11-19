@@ -695,53 +695,54 @@ describe('command line', () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   it('runs mock mode with no token', async () => {
-    assert.equal(await run({ argv: ['--mock'], env: {}, cwd: dir, print }), 0);
+    assert.equal(await run({ argv: ['match-csv', '--mock', 'handles.example.csv'], env: {}, cwd: dir, print }), 0);
     assert.match(lines.join('\n'), /mock mode/);
     assert.equal(readFileSync(join(dir, 'output', 'mock-results.jsonl'), 'utf8').trim().split('\n').length, 2);
   });
 
   it('asks for a token before running on real creators', async () => {
-    await assert.rejects(run({ argv: ['instagram', 'someone'], env: {}, cwd: dir, print }), /MODASH_API_TOKEN/);
+    await assert.rejects(run({ argv: ['match-creator', 'instagram', 'someone'], env: {}, cwd: dir, print }), /MODASH_API_TOKEN/);
   });
 
   it('runs live without --mock, so no token asks for one', async () => {
-    await assert.rejects(run({ argv: [], env: {}, cwd: dir, print }), /MODASH_API_TOKEN/);
+    await assert.rejects(run({ argv: ['match-csv', 'h.csv'], env: {}, cwd: dir, print }), /MODASH_API_TOKEN/);
   });
 
   it('says what input is missing', async () => {
-    await assert.rejects(run({ argv: [], env: { MODASH_API_TOKEN: 'abc' }, cwd: dir, print }), /Give a platform and a handle, or --csv <file>/);
-    await assert.rejects(run({ argv: ['--mock', 'instagram'], env: {}, cwd: dir, print }), /got only one value/);
-    await assert.rejects(run({ argv: ['--mock', '--csv', 'x.csv', 'instagram', 'a'], env: {}, cwd: dir, print }), /not both/);
+    await assert.rejects(run({ argv: [], env: { MODASH_API_TOKEN: 'abc' }, cwd: dir, print }), /Give a command/);
+    await assert.rejects(run({ argv: ['match-creator', '--mock', 'instagram'], env: {}, cwd: dir, print }), /match-creator takes a platform and a handle, got "instagram"/);
+    await assert.rejects(run({ argv: ['match-csv', '--mock'], env: {}, cwd: dir, print }), /match-csv takes a file, got nothing/);
+    await assert.rejects(run({ argv: ['match', 'instagram', 'a'], env: {}, cwd: dir, print }), /Unknown command "match"/);
   });
 
   it('refuses a creator mock mode has no data for, with or without a token', async () => {
     for (const env of [{}, { MODASH_API_TOKEN: 'abc' }]) {
-      await assert.rejects(run({ argv: ['--mock', 'instagram', 'bob'], env, cwd: dir, print }), /mock mode knows only/);
+      await assert.rejects(run({ argv: ['match-creator', '--mock', 'instagram', 'bob'], env, cwd: dir, print }), /mock mode knows only/);
     }
   });
 
   it('applies the credit budget in mock mode too', async () => {
-    assert.equal(await run({ argv: ['--mock', '--max-credits', '2'], env: {}, cwd: dir, print }), 1);
+    assert.equal(await run({ argv: ['match-csv', '--mock', '--max-credits', '2', 'handles.example.csv'], env: {}, cwd: dir, print }), 1);
     assert.match(lines.join('\n'), /Stopped at @example_baker/);
   });
 
   it('runs a CSV in mock mode and skips bad rows', async () => {
     const csv = join(dir, 'h.csv');
     writeFileSync(csv, '﻿platform,handle\ninstagram,example_baker\nfacebook,x\n"instagram","https://www.instagram.com/example_baker/"\n');
-    assert.equal(await run({ argv: ['--mock', '--csv', csv], env: {}, cwd: dir, print }), 0);
+    assert.equal(await run({ argv: ['match-csv', '--mock', csv], env: {}, cwd: dir, print }), 0);
     assert.match(lines.join('\n'), /row 2 skipped/);
     assert.equal(readFileSync(join(dir, 'output', 'mock-results.jsonl'), 'utf8').trim().split('\n').length, 1);
   });
 
   it('turns an unreadable single handle into a usage message', async () => {
     await assert.rejects(
-      run({ argv: ['--mock', 'instagram', 'https://x.com/amy'], env: {}, print: () => {} }),
+      run({ argv: ['match-creator', '--mock', 'instagram', 'https://x.com/amy'], env: {}, print: () => {} }),
       /could not read a instagram handle/,
     );
   });
 
   it('turns an unknown flag into a usage message', async () => {
-    await assert.rejects(run({ argv: ['--demo'], env: {}, print: () => {} }), /Usage/);
+    await assert.rejects(run({ argv: ['match-csv', '--demo'], env: {}, print: () => {} }), /Usage/);
   });
 
 
