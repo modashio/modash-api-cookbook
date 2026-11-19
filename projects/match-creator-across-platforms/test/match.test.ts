@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -12,7 +12,7 @@ import { CreditBudgetExceededError, ModashApiError, stopsTheRun } from '../src/m
 import { fixtureKey, mockTransport } from '../src/modash/mock.js';
 import { modashReads } from '../src/modash/reads.js';
 import { openResults } from '../src/results.js';
-import { parseCsv, run } from '../src/run.js';
+import { parseCsv, run, UsageError } from '../src/run.js';
 import { memoryReads } from './memory-reads.js';
 
 const report = (userId: string, profile: object, contacts: object[]) => ({
@@ -739,6 +739,22 @@ describe('command line', () => {
       run({ argv: ['match-creator', '--mock', 'instagram', 'https://x.com/amy'], env: {}, print: () => {} }),
       /could not read a instagram handle/,
     );
+  });
+
+  it('lists every bad parameter in one message before it starts', async () => {
+    const error = await run({ argv: ['match-creator', 'facebook', 'bob', '--max-credits', 'Infinity'], env: {}, cwd: dir, print }).catch((e) => e);
+    assert.ok(error instanceof UsageError);
+    assert.match(error.message, /The run did not start/);
+    assert.match(error.message, /platform must be one of instagram, tiktok, youtube, got "facebook"/);
+    assert.match(error.message, /MODASH_API_TOKEN/);
+    assert.match(error.message, /--max-credits must be a number above 0, got "Infinity"/);
+    assert.equal(existsSync(join(dir, 'output')), false);
+  });
+
+  it('refuses a --max-credits that is not a number above 0', async () => {
+    for (const value of ['0', '-5', 'abc', '', 'Infinity']) {
+      await assert.rejects(run({ argv: ['match-csv', '--mock', `--max-credits=${value}`, 'handles.example.csv'], env: {}, cwd: dir, print }), /--max-credits must be a number above 0/);
+    }
   });
 
   it('turns an unknown flag into a usage message', async () => {

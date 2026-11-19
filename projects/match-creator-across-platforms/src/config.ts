@@ -1,8 +1,11 @@
 import * as z from 'zod';
 
+/** One rule for the budget, from MODASH_CREDIT_BUDGET or from --max-credits. */
+export const creditBudgetSchema = z.coerce.number().positive().finite();
+
 const environmentSchema = z.object({
   MODASH_API_TOKEN: z.string().min(1).optional(),
-  MODASH_CREDIT_BUDGET: z.coerce.number().positive().default(50),
+  MODASH_CREDIT_BUDGET: creditBudgetSchema.default(50),
 });
 
 export interface Config {

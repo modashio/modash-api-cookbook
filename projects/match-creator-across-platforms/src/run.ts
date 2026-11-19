@@ -3,7 +3,7 @@ import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { type CreatorRow, parseRows, runBatch } from './batch.js';
-import { loadConfig } from './config.js';
+import { type Config, creditBudgetSchema, loadConfig } from './config.js';
 import { PLATFORMS } from './contacts.js';
 import type { MatchResult } from './creator-match.js';
 import { Matcher } from './match.js';
@@ -34,54 +34,22 @@ type Command = (typeof COMMANDS)[number];
 
 export class UsageError extends Error {}
 
+interface Input {
+  csv: boolean;
+  rows: CreatorRow[];
+  mock: boolean;
+  budget: number;
+  apiToken: string | undefined;
+}
+
 export async function run({ argv, env = process.env, cwd = process.cwd(), print = console.log }: RunOptions): Promise<number> {
-  let parsed;
-  try {
-    parsed = parseArgs({
-      args: argv,
-      allowPositionals: true,
-      options: {
-        mock: { type: 'boolean', default: false },
-        'max-credits': { type: 'string' },
-        help: { type: 'boolean', short: 'h', default: false },
-      },
-    });
-  } catch (error) {
-    throw new UsageError(`${(error as Error).message}\n\n${USAGE}`);
-  }
-  const { values } = parsed;
-  if (values.help) {
+  const input = parseInput(argv, env);
+  if (input === 'help') {
     print(USAGE);
     return 0;
   }
-  const [command, ...args] = parsed.positionals;
-  if (!(COMMANDS as readonly string[]).includes(command ?? '')) {
-    const problem = command === undefined ? 'Give a command.' : `Unknown command "${command}".`;
-    throw new UsageError(`${problem} Use ${COMMANDS.join(' or ')}.\n\n${USAGE}`);
-  }
-  const csv = (command as Command) === 'match-csv';
-  const expected = csv ? 'a file' : 'a platform and a handle';
-  if (args.length !== (csv ? 1 : 2)) {
-    throw new UsageError(`${command} takes ${expected}, got ${args.length === 0 ? 'nothing' : args.map((a) => `"${a}"`).join(' ')}.\n\n${USAGE}`);
-  }
+  const { csv, rows: todo, mock, budget, apiToken } = input;
 
-  let config;
-  try {
-    config = loadConfig(env);
-  } catch (error) {
-    throw new UsageError((error as Error).message);
-  }
-  const mock = values.mock;
-  if (!mock && !config.apiToken) {
-    throw new UsageError('Set MODASH_API_TOKEN (in .env or your shell) to run live. To try it without a token, run npm run dev.');
-  }
-
-  const budget = values['max-credits'] === undefined ? config.creditBudget : Number(values['max-credits']);
-  if (!(budget > 0)) throw new UsageError('--max-credits must be a number above 0');
-
-  let todo = csv ? parseRows(readCsv(args[0]!)) : parseRows([[args[0]!, args[1]!]]);
-  if (mock) todo = todo.map(onlyMockCreators);
-  if (!csv && todo[0]!.kind === 'skipped') throw new UsageError(todo[0]!.reason);
   // Mock mode starts the file over, a CSV resumes it, and a single handle replaces its own line.
   const mode: ResultsMode = mock
     ? { kind: 'fresh' }
@@ -94,7 +62,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   const shown = relative(cwd, resultsFile);
   const client = mock
     ? new ModashClient(mockTransport(), { pauseMs: 0, budget })
-    : new ModashClient(liveTransport(config.apiToken!), { budget });
+    : new ModashClient(liveTransport(apiToken!), { budget });
   const matcher = new Matcher(modashReads(client, mock ? undefined : join(outDir, 'reports')));
 
   const { ran, stoppedAt } = await runBatch({
@@ -117,6 +85,78 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   else if (mock) print(`Results in ${shown}. This was mock mode, so nothing was spent; a live run of the same creators costs ${total} credits.`);
   else print(`Results in ${shown}. Credits this run: ${total}`);
   return 0;
+}
+
+// Checks every parameter before any file is written or any call is made, and reports all the problems in one message.
+function parseInput(argv: string[], env: NodeJS.ProcessEnv): Input | 'help' {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      options: {
+        mock: { type: 'boolean', default: false },
+        'max-credits': { type: 'string' },
+        help: { type: 'boolean', short: 'h', default: false },
+      },
+    });
+  } catch (error) {
+    throw new UsageError(`${(error as Error).message}\n\n${USAGE}`);
+  }
+  const { values, positionals } = parsed;
+  if (values.help) return 'help';
+  const [command, ...args] = positionals;
+  if (!(COMMANDS as readonly string[]).includes(command ?? '')) {
+    const problem = command === undefined ? 'Give a command.' : `Unknown command "${command}".`;
+    throw new UsageError(`${problem} Use ${COMMANDS.join(' or ')}.\n\n${USAGE}`);
+  }
+
+  const csv = (command as Command) === 'match-csv';
+  const mock = values.mock;
+  const problems: string[] = [];
+  let showUsage = false;
+
+  let rows: CreatorRow[] = [];
+  if (args.length !== (csv ? 1 : 2)) {
+    const expected = csv ? 'a file' : 'a platform and a handle';
+    problems.push(`${command} takes ${expected}, got ${args.length === 0 ? 'nothing' : args.map((a) => `"${a}"`).join(' ')}.`);
+    showUsage = true;
+  } else if (csv) {
+    try {
+      rows = parseRows(readCsv(args[0]!));
+    } catch (error) {
+      problems.push((error as Error).message);
+    }
+  } else {
+    rows = parseRows([[args[0]!, args[1]!]]);
+  }
+  if (mock) rows = rows.map(onlyMockCreators);
+  // A CSV skips its bad rows, but the one creator of match-creator must be valid.
+  if (!csv && rows[0]?.kind === 'skipped') problems.push(rows[0].reason);
+
+  let config: Config | undefined;
+  try {
+    config = loadConfig(env);
+  } catch (error) {
+    problems.push((error as Error).message);
+  }
+  if (config && !mock && !config.apiToken) {
+    problems.push('Set MODASH_API_TOKEN (in .env or your shell) to run live. To try it without a token, run npm run dev.');
+  }
+
+  let budget = config?.creditBudget ?? 0;
+  const maxCredits = values['max-credits'];
+  if (maxCredits !== undefined) {
+    const parsedBudget = creditBudgetSchema.safeParse(maxCredits);
+    if (parsedBudget.success) budget = parsedBudget.data;
+    else problems.push(`--max-credits must be a number above 0, got "${maxCredits}".`);
+  }
+
+  if (problems.length > 0) {
+    const message = problems.length === 1 ? problems[0]! : `The run did not start:\n${problems.map((p) => `  - ${p}`).join('\n')}`;
+    throw new UsageError(showUsage ? `${message}\n\n${USAGE}` : message);
+  }
+  return { csv, rows, mock, budget, apiToken: config!.apiToken };
 }
 
 // Mock mode answers only for the invented creators, so any other row is skipped instead of failing with a 404.
