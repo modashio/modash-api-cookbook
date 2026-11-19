@@ -1,8 +1,8 @@
 import { groupBy, partition, uniq, uniqBy } from 'lodash-es';
 
-import { emailsIn, isPlatform, PLATFORMS, type Platform } from './contacts.js';
+import { emailsIn, isPlatform, nameOf, PLATFORMS, type Platform } from './contacts.js';
 import type { Candidate } from './creator-match.js';
-import type { EmailSearchHit } from './modash/reads.js';
+import type { MatchedEmail } from './modash/reads.js';
 import type { ReportProfile } from './modash/responses.js';
 
 /** One account that lists one email: from email search, or from a report the tool holds. */
@@ -11,6 +11,24 @@ export interface EmailListing {
   platform: Platform;
   userId: string;
 }
+
+export interface EmailSearchHit extends EmailListing {
+  username: string | null;
+  followers: number | null;
+}
+
+/** One hit per email, platform and account; rows without an account id or on another platform are dropped. */
+export const emailSearchHits = (matches: MatchedEmail[]): EmailSearchHit[] =>
+  uniqBy(
+    matches.flatMap(({ email, users }) =>
+      (users ?? []).flatMap(({ platform, userId, followers, ...row }) =>
+        userId && platform && isPlatform(platform)
+          ? [{ email: (email ?? '').toLowerCase(), platform, userId, username: nameOf(row), followers: followers ?? null }]
+          : [],
+      ),
+    ),
+    (hit) => `${hit.email}:${hit.platform}:${hit.userId}`,
+  );
 
 /** The creator's account per platform, as far as the run has matched them. */
 export type Matched = Partial<Record<Platform, { userId: string }>>;

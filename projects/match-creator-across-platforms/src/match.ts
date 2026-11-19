@@ -1,14 +1,12 @@
 import { partition } from 'lodash-es';
 
 import { type Account, CreatorMatch, type MatchResult } from './creator-match.js';
-import { emailsIn, handleFrom, idFrom, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
-import { type EmailEvidence, searchEmailEvidence } from './email-evidence.js';
+import { emailsIn, type FoundAccount, handleFrom, idFrom, nameOf, namesOf, pickAccount, PLATFORMS, type Platform } from './contacts.js';
+import { type EmailEvidence, emailSearchHits, searchEmailEvidence } from './email-evidence.js';
 import { stopsTheRun } from './modash/errors.js';
 import type { ModashReads } from './modash/reads.js';
 import type { ReportProfile } from './modash/responses.js';
 import { round2 } from './numbers.js';
-
-export type { MatchResult } from './creator-match.js';
 
 /** The account the run started from, and what its report says about it. */
 interface Start {
@@ -67,7 +65,7 @@ export class Matcher {
 
   /** Step 1: turn the handle into an id, then pull that account's report. */
   async #readStart(platform: Platform, handle: string, creator: CreatorMatch): Promise<Start | undefined> {
-    const me = await this.#safe(creator, `lookup ${platform} @${handle}`, () => this.reads.findAccount(platform, handle));
+    const me = await this.#findAccount(creator, platform, handle);
     if (!me) return undefined;
     const report = await this.#tryReport(creator, platform, me.userId);
     const followers = report?.profile?.followers ?? me.followers ?? null;
@@ -122,9 +120,7 @@ export class Matcher {
         continue;
       }
       const handle = handleFrom(other, contact.value);
-      const row = handle
-        ? await this.#safe(creator, `lookup ${other} @${handle}`, () => this.reads.findAccount(other, handle))
-        : undefined;
+      const row = handle ? await this.#findAccount(creator, other, handle) : undefined;
       if (row) ids.add(row.userId);
     }
     return [...ids];
@@ -134,7 +130,7 @@ export class Matcher {
   async #matchByEmail(creator: CreatorMatch, claimedOn: ReportProfile[]): Promise<EmailEvidence> {
     const claimed = claimedOn.flatMap((report) => [...emailsIn(report)]);
     const evidence = await searchEmailEvidence(claimed, creator.matched, (emails) =>
-      this.#safe(creator, 'email search', () => this.reads.searchEmails(emails)),
+      this.#safe(creator, 'email search', async () => emailSearchHits(await this.reads.searchEmails(emails))),
     );
     for (const { accept, candidate } of evidence.verdicts) {
       if (!accept) {
@@ -152,7 +148,7 @@ export class Matcher {
     for (const other of creator.missing()) {
       for (const name of start.names) {
         if (creator.account(other)) break;
-        const row = await this.#safe(creator, `lookup ${other} @${name}`, () => this.reads.findAccount(other, name));
+        const row = await this.#findAccount(creator, other, name);
         if (!row) continue;
         const back = await this.#tryReport(creator, other, row.userId);
         const followers = back?.profile?.followers ?? row.followers ?? null;
@@ -167,6 +163,11 @@ export class Matcher {
         }
       }
     }
+  }
+
+  async #findAccount(creator: CreatorMatch, platform: Platform, handle: string): Promise<FoundAccount | undefined> {
+    const rows = await this.#safe(creator, `lookup ${platform} @${handle}`, () => this.reads.lookupAccounts(platform, handle));
+    return pickAccount(rows ?? [], handle);
   }
 
   #tryReport(creator: CreatorMatch, platform: Platform, userId: string): Promise<ReportProfile | undefined> {

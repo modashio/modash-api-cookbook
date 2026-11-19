@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { handleFrom, idFrom } from '../src/contacts.js';
-import { type MatchResult, Matcher } from '../src/match.js';
+import type { MatchResult } from '../src/creator-match.js';
+import { Matcher } from '../src/match.js';
 import { ModashClient, type Transport } from '../src/modash/client.js';
 import { CreditBudgetExceededError, ModashApiError, stopsTheRun } from '../src/modash/errors.js';
 import { fixtureKey, mockTransport } from '../src/modash/mock.js';
@@ -147,7 +148,7 @@ describe('errors and credits', () => {
       calls += 1;
       return calls < 3 ? { status: 503, body: {} } : { status: 200, body: { users: [] } };
     };
-    await modashReads(client(t)).findAccount('instagram', 'amy');
+    await modashReads(client(t)).lookupAccounts('instagram', 'amy');
     assert.equal(calls, 3);
   });
 
@@ -167,7 +168,7 @@ describe('errors and credits', () => {
       calls += 1;
       throw new TypeError('x is undefined');
     };
-    await assert.rejects(modashReads(client(t)).findAccount('instagram', 'amy'), TypeError);
+    await assert.rejects(modashReads(client(t)).lookupAccounts('instagram', 'amy'), TypeError);
     assert.equal(calls, 1);
   });
 
@@ -178,7 +179,7 @@ describe('errors and credits', () => {
       if (calls < 2) throw new DOMException('timed out', 'TimeoutError');
       return { status: 200, body: { users: [] } };
     };
-    await modashReads(client(t)).findAccount('instagram', 'amy');
+    await modashReads(client(t)).lookupAccounts('instagram', 'amy');
     assert.equal(calls, 2);
   });
 
@@ -374,6 +375,16 @@ describe('matching', () => {
     assert.equal(r.accounts.youtube?.userId, uc);
     assert.equal(r.accounts.tiktok, undefined);
     assert.deepEqual(r.candidates.map((c) => c.userId), ['77']);
+  });
+
+  it('reads an email the search returns in another case as the claimed one', async () => {
+    const reads = memoryReads({
+      accounts: [amyAccount],
+      reports: [amyReport([{ type: 'email', value: 'amy@example.com' }])],
+      listings: [{ email: 'Amy@Example.com', platform: 'tiktok', userId: '9' }],
+    });
+    const r = await new Matcher(reads).match('instagram', 'amy');
+    assert.equal(r.accounts.tiktok?.how, 'email (amy@example.com)');
   });
 
   it('lists both accounts when two emails name different accounts on one platform', async () => {
@@ -649,15 +660,13 @@ describe('matching', () => {
   });
 
   it('prefers a current handle over another channel\'s older name', async () => {
-    const t = fake({
-      'GET youtube/users?query=amy': {
-        users: [
-          { userId: 'UC1', username: 'amy', handle: '@bob' },
-          { userId: 'UC2', handle: '@amy' },
-        ],
-      },
+    const reads = memoryReads({
+      accounts: [
+        { platform: 'youtube', userId: 'UC1', username: 'amy', handle: '@bob' },
+        { platform: 'youtube', userId: 'UC2', handle: '@amy' },
+      ],
     });
-    assert.equal((await modashReads(client(t)).findAccount('youtube', 'amy'))?.userId, 'UC2');
+    assert.equal((await new Matcher(reads).match('youtube', 'amy')).accounts.youtube?.userId, 'UC2');
   });
 
   it('tries every name the start answers to when looking for the same handle', async () => {

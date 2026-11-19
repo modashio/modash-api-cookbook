@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { runBatch } from '../src/batch.js';
-import { type MatchResult, Matcher } from '../src/match.js';
+import type { MatchResult } from '../src/creator-match.js';
+import { Matcher } from '../src/match.js';
 import { CreditBudgetExceededError } from '../src/modash/errors.js';
 import { memoryReads } from './memory-reads.js';
 
@@ -52,9 +53,9 @@ describe('batch run', () => {
     const reads = memoryReads({});
     const matcher = new Matcher({
       ...reads,
-      async findAccount(platform, handle) {
-        if (handle === 'bea') throw stop;
-        return reads.findAccount(platform, handle);
+      async lookupAccounts(platform, query) {
+        if (query === 'bea') throw stop;
+        return reads.lookupAccounts(platform, query);
       },
     });
     const outcome = await runBatch({ rows: rows('amy', 'bea', 'cat'), matcher, resultsPath, kind: 'csv' });

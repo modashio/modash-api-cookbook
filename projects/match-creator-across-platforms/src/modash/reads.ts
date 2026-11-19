@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { uniqBy } from 'lodash-es';
+import type * as z from 'zod';
 
-import { isPlatform, nameOf, namesOf, type Platform } from '../contacts.js';
+import type { Platform } from '../contacts.js';
 import { writeAtomic } from '../results.js';
 import type { ModashClient } from './client.js';
 import {
@@ -15,22 +15,13 @@ import {
   usersResponseSchema,
 } from './responses.js';
 
-export type FoundAccount = UserRow & { userId: string };
-
-export interface EmailSearchHit {
-  email: string;
-  platform: Platform;
-  userId: string;
-  username: string | null;
-  followers: number | null;
-}
+export type MatchedEmail = NonNullable<z.infer<typeof emailSearchResponseSchema>['matchedEmails']>[number];
 
 export interface ModashReads {
   readonly spent: number;
-  /** The lookup can return more than one account; keep the exact handle, and a current handle over an older name. */
-  findAccount(platform: Platform, handle: string): Promise<FoundAccount | undefined>;
+  lookupAccounts(platform: Platform, query: string): Promise<UserRow[]>;
   report(platform: Platform, userId: string): Promise<ReportProfile>;
-  searchEmails(emails: string[]): Promise<EmailSearchHit[]>;
+  searchEmails(emails: string[]): Promise<MatchedEmail[]>;
 }
 
 interface ReportCache {
@@ -67,13 +58,9 @@ export function modashReads(client: ModashClient, reportsDir?: string): ModashRe
       return client.spent;
     },
 
-    async findAccount(platform, handle) {
-      const data = await lookupUsers(client, platform, handle);
-      const wanted = handle.toLowerCase();
-      const rows = (data.users ?? []).filter((row): row is FoundAccount => !!row.userId);
-      return (
-        rows.find((row) => (nameOf(row) ?? '').toLowerCase() === wanted) ?? rows.find((row) => namesOf(row).has(wanted))
-      );
+    async lookupAccounts(platform, query) {
+      const data = await lookupUsers(client, platform, query);
+      return data.users ?? [];
     },
 
     async report(platform, userId) {
@@ -86,16 +73,7 @@ export function modashReads(client: ModashClient, reportsDir?: string): ModashRe
 
     async searchEmails(emails) {
       const data = await searchEmails(client, emails);
-      return uniqBy(
-        (data.matchedEmails ?? []).flatMap(({ email, users }) =>
-          (users ?? []).flatMap(({ platform, userId, followers, ...row }) =>
-            userId && platform && isPlatform(platform)
-              ? [{ email: (email ?? '').toLowerCase(), platform, userId, username: nameOf(row), followers: followers ?? null }]
-              : [],
-          ),
-        ),
-        (row) => `${row.email}:${row.platform}:${row.userId}`,
-      );
+      return data.matchedEmails ?? [];
     },
   };
 }

@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { sortBy, uniqBy } from 'lodash-es';
 
 import type { Platform } from './contacts.js';
-import type { MatchResult } from './match.js';
+import type { MatchResult } from './creator-match.js';
 
 export const creatorKey = (platform: Platform, handle: string) => `${platform}:${handle.toLowerCase()}`;
 

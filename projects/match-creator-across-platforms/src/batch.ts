@@ -1,5 +1,6 @@
 import { handleFrom, isPlatform, PLATFORMS, type Platform } from './contacts.js';
-import type { MatchResult, Matcher } from './match.js';
+import type { MatchResult } from './creator-match.js';
+import type { Matcher } from './match.js';
 import { type CreditBudgetExceededError, type ModashApiError, stopsTheRun } from './modash/errors.js';
 import { creatorKey, openResults, type ResultsMode } from './results.js';
 

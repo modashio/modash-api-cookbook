@@ -75,6 +75,18 @@ export function namesOf(row: UserRow | null | undefined): Set<string> {
   return names;
 }
 
+export type FoundAccount = UserRow & { userId: string };
+
+/** A lookup can return more than one account; keep the exact handle, and a current handle over an older name. */
+export const pickAccount = (rows: UserRow[], handle: string): FoundAccount | undefined => {
+  const wanted = handle.toLowerCase();
+  const accounts = rows.filter((row): row is FoundAccount => !!row.userId);
+  return (
+    accounts.find((row) => (nameOf(row) ?? '').toLowerCase() === wanted) ??
+    accounts.find((row) => namesOf(row).has(wanted))
+  );
+};
+
 export function emailsIn(report: ReportProfile | null | undefined): Set<string> {
   const emails = new Set<string>();
   for (const contact of report?.contacts ?? []) {

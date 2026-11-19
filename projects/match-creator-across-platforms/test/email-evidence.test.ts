@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import type { Platform } from '../src/contacts.js';
-import { type Matched, searchEmailEvidence } from '../src/email-evidence.js';
-import type { EmailSearchHit } from '../src/modash/reads.js';
+import { type EmailSearchHit, type Matched, searchEmailEvidence } from '../src/email-evidence.js';
 import type { ReportProfile } from '../src/modash/responses.js';
 
 const hit = (email: string, platform: Platform, userId: string): EmailSearchHit => ({
