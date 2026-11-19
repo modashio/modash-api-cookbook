@@ -1,6 +1,7 @@
 import { remove } from 'lodash-es';
 
 import { PLATFORMS, type Platform } from './contacts.js';
+import type { CreatorReads } from './creator-reads.js';
 import type { ReportProfile } from './modash/responses.js';
 
 export interface Account {
@@ -29,18 +30,20 @@ interface EmailAgreement {
   agreeing(): Platform[];
 }
 
-/** Everything the run knows about one creator: the accounts matched so far, the candidates, and the reports held. */
+/** The part of the creator's reads the match reads: the reports held, the errors, and the credits spent. */
+type ReadsSoFar = Pick<CreatorReads, 'heldReport' | 'errors' | 'credits'>;
+
+/** Everything the run knows about one creator: the accounts matched so far and the candidates. */
 export class CreatorMatch {
   readonly #input: MatchResult['input'];
+  readonly #reads: ReadsSoFar;
   readonly #accounts: MatchResult['accounts'] = {};
   readonly #candidates: Candidate[] = [];
-  readonly #errors: string[] = [];
-  /** Reports asked for while matching this creator (null when the call failed), so none is paid for twice. */
-  readonly #reports = new Map<string, ReportProfile | null>();
   #emailEvidence: EmailAgreement | undefined;
 
-  constructor(platform: Platform, handle: string) {
+  constructor(platform: Platform, handle: string, reads: ReadsSoFar) {
     this.#input = { platform, handle };
+    this.#reads = reads;
   }
 
   account(platform: Platform): Account | undefined {
@@ -66,26 +69,8 @@ export class CreatorMatch {
     if (!listed) this.#candidates.push(candidate);
   }
 
-  fail(error: string): void {
-    this.#errors.push(error);
-  }
-
-  /** A report that failed is not asked for again for the same creator: the failed call may have been billed. */
-  async reportOnce(
-    platform: Platform,
-    userId: string,
-    ask: () => Promise<ReportProfile | undefined>,
-  ): Promise<ReportProfile | undefined> {
-    const key = `${platform}:${userId}`;
-    if (!this.#reports.has(key)) {
-      const report = await ask();
-      this.#reports.set(key, report ?? null);
-    }
-    return this.#reports.get(key) ?? undefined;
-  }
-
   heldReport(platform: Platform, userId: string): ReportProfile | undefined {
-    return this.#reports.get(`${platform}:${userId}`) ?? undefined;
+    return this.#reads.heldReport(platform, userId);
   }
 
   /** The email evidence searched for this creator; the result marks the matched accounts it says agree. */
@@ -93,15 +78,15 @@ export class CreatorMatch {
     this.#emailEvidence = evidence;
   }
 
-  result(credits: number): MatchResult {
+  result(): MatchResult {
     for (const platform of this.#emailEvidence?.agreeing() ?? []) this.#accounts[platform]!.email_agrees = true;
     return {
       input: this.#input,
       accounts: this.#accounts,
       candidates: this.#candidates,
       missing: this.missing(),
-      credits,
-      errors: this.#errors,
+      credits: this.#reads.credits,
+      errors: this.#reads.errors,
     };
   }
 }

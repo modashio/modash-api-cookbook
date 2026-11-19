@@ -1,12 +1,11 @@
 import { partition } from 'lodash-es';
 
 import { type Account, CreatorMatch, type MatchResult } from './creator-match.js';
-import { emailsIn, type FoundAccount, handleFrom, idFrom, nameOf, namesOf, pickAccount, PLATFORMS, type Platform } from './contacts.js';
-import { type EmailEvidence, emailSearchHits, searchEmailEvidence } from './email-evidence.js';
-import { stopsTheRun } from './modash/errors.js';
+import { emailsIn, handleFrom, idFrom, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
+import { CreatorReads } from './creator-reads.js';
+import { type EmailEvidence, searchEmailEvidence } from './email-evidence.js';
 import type { ModashReads } from './modash/reads.js';
 import type { ReportProfile } from './modash/responses.js';
-import { round2 } from './numbers.js';
 
 /** The account the run started from, and what its report says about it. */
 interface Start {
@@ -17,24 +16,8 @@ interface Start {
   report: ReportProfile;
 }
 
-function describe(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const code = (error.cause as { code?: unknown } | undefined)?.code;
-  return typeof code === 'string' ? `${error.message} (${code})` : error.message;
-}
-
 export class Matcher {
   constructor(private readonly reads: ModashReads) {}
-
-  async #safe<T>(creator: CreatorMatch, what: string, step: () => Promise<T>): Promise<T | undefined> {
-    try {
-      return await step();
-    } catch (error) {
-      if (stopsTheRun(error)) throw error;
-      creator.fail(`${what}: ${describe(error)}`);
-      return undefined;
-    }
-  }
 
   static pointsBack(report: ReportProfile, platform: Platform, startNames: Set<string>, startId: string): boolean {
     return (report.contacts ?? []).some(
@@ -45,27 +28,26 @@ export class Matcher {
   }
 
   async match(platform: Platform, handle: string): Promise<MatchResult> {
-    const spentBefore = this.reads.spent;
-    const creator = new CreatorMatch(platform, handle);
+    const reads = new CreatorReads(this.reads);
+    const creator = new CreatorMatch(platform, handle, reads);
     try {
-      const start = await this.#readStart(platform, handle, creator);
+      const start = await this.#readStart(platform, handle, creator, reads);
       if (start) {
-        const confirmed = await this.#followProfileLinks(start, creator);
-        const evidence = await this.#matchByEmail(creator, [start.report, ...confirmed]);
-        await this.#trySameHandle(start, creator, evidence);
+        const confirmed = await this.#followProfileLinks(start, creator, reads);
+        const evidence = await this.#matchByEmail(creator, reads, [start.report, ...confirmed]);
+        await this.#trySameHandle(start, creator, reads, evidence);
       }
     } catch (error) {
-      if (stopsTheRun(error)) throw error;
-      creator.fail(describe(error));
+      reads.fail(error);
     }
-    return creator.result(round2(this.reads.spent - spentBefore));
+    return creator.result();
   }
 
   /** Step 1: turn the handle into an id, then pull that account's report. */
-  async #readStart(platform: Platform, handle: string, creator: CreatorMatch): Promise<Start | undefined> {
-    const me = await this.#findAccount(creator, platform, handle);
+  async #readStart(platform: Platform, handle: string, creator: CreatorMatch, reads: CreatorReads): Promise<Start | undefined> {
+    const me = await reads.account(platform, handle);
     if (!me) return undefined;
-    const report = await this.#tryReport(creator, platform, me.userId);
+    const report = await reads.report(platform, me.userId);
     const followers = report?.profile?.followers ?? me.followers ?? null;
     creator.accept({ platform, userId: me.userId, username: nameOf(me), followers, how: 'input' });
     if (!report) return undefined;
@@ -78,13 +60,13 @@ export class Matcher {
   }
 
   /** Steps 2 and 3: a linked account is a match only when its own report links back to the start. */
-  async #followProfileLinks(start: Start, creator: CreatorMatch): Promise<ReportProfile[]> {
+  async #followProfileLinks(start: Start, creator: CreatorMatch, reads: CreatorReads): Promise<ReportProfile[]> {
     const confirmed: ReportProfile[] = [];
     for (const other of PLATFORMS) {
       if (other === start.platform) continue;
       const linked: { account: Account; report: ReportProfile }[] = [];
-      for (const userId of await this.#linkedIds(start, other, creator)) {
-        const report = await this.#tryReport(creator, other, userId);
+      for (const userId of await this.#linkedIds(start, other, reads)) {
+        const report = await reads.report(other, userId);
         if (!report) continue;
         linked.push({
           report,
@@ -108,7 +90,7 @@ export class Matcher {
     return confirmed;
   }
 
-  async #linkedIds(start: Start, other: Platform, creator: CreatorMatch): Promise<string[]> {
+  async #linkedIds(start: Start, other: Platform, reads: CreatorReads): Promise<string[]> {
     const ids = new Set<string>();
     for (const contact of start.report.contacts ?? []) {
       if (contact.type !== other || !contact.value) continue;
@@ -118,18 +100,16 @@ export class Matcher {
         continue;
       }
       const handle = handleFrom(other, contact.value);
-      const row = handle ? await this.#findAccount(creator, other, handle) : undefined;
+      const row = handle ? await reads.account(other, handle) : undefined;
       if (row) ids.add(row.userId);
     }
     return [...ids];
   }
 
   /** Step 4: one account per platform across the emails is a match; a shared address or a conflict gives candidates. */
-  async #matchByEmail(creator: CreatorMatch, claimedOn: ReportProfile[]): Promise<EmailEvidence> {
+  async #matchByEmail(creator: CreatorMatch, reads: CreatorReads, claimedOn: ReportProfile[]): Promise<EmailEvidence> {
     const claimed = claimedOn.flatMap((report) => [...emailsIn(report)]);
-    const evidence = await searchEmailEvidence(creator, claimed, (emails) =>
-      this.#safe(creator, 'email search', async () => emailSearchHits(await this.reads.searchEmails(emails))),
-    );
+    const evidence = await searchEmailEvidence(creator, claimed, (emails) => reads.searchEmails(emails));
     creator.useEmailEvidence(evidence);
     for (const { accept, candidate } of evidence.verdicts) {
       if (accept) creator.accept(candidate);
@@ -139,13 +119,13 @@ export class Matcher {
   }
 
   /** Step 5: an account with one of the start's names is a guess until its own report confirms it. */
-  async #trySameHandle(start: Start, creator: CreatorMatch, evidence: EmailEvidence): Promise<void> {
+  async #trySameHandle(start: Start, creator: CreatorMatch, reads: CreatorReads, evidence: EmailEvidence): Promise<void> {
     for (const other of creator.missing()) {
       for (const name of start.names) {
         if (creator.account(other)) break;
-        const row = await this.#findAccount(creator, other, name);
+        const row = await reads.account(other, name);
         if (!row) continue;
-        const back = await this.#tryReport(creator, other, row.userId);
+        const back = await reads.report(other, row.userId);
         const followers = back?.profile?.followers ?? row.followers ?? null;
         const base = { platform: other, userId: row.userId, username: nameOf(row), followers };
         const shared = back ? evidence.confirming(other, row.userId, emailsIn(back)) : [];
@@ -158,16 +138,5 @@ export class Matcher {
         }
       }
     }
-  }
-
-  async #findAccount(creator: CreatorMatch, platform: Platform, handle: string): Promise<FoundAccount | undefined> {
-    const rows = await this.#safe(creator, `lookup ${platform} @${handle}`, () => this.reads.lookupAccounts(platform, handle));
-    return pickAccount(rows ?? [], handle);
-  }
-
-  #tryReport(creator: CreatorMatch, platform: Platform, userId: string): Promise<ReportProfile | undefined> {
-    return creator.reportOnce(platform, userId, () =>
-      this.#safe(creator, `report ${platform} ${userId}`, () => this.reads.report(platform, userId)),
-    );
   }
 }
