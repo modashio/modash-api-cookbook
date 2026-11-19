@@ -31,19 +31,26 @@ export class Matcher {
     const reads = new CreatorReads(this.reads);
     const creator = new CreatorMatch(platform, handle, reads);
     try {
-      const start = await this.#readStart(platform, handle, creator, reads);
-      if (start) {
-        const confirmed = await this.#followProfileLinks(start, creator, reads);
-        const evidence = await this.#matchByEmail(creator, reads, [start.report, ...confirmed]);
-        await this.#trySameHandle(start, creator, reads, evidence);
-      }
+      await this.#runSteps(platform, handle, creator, reads);
     } catch (error) {
       reads.fail(error);
     }
     return creator.result();
   }
 
-  /** Step 1: turn the handle into an id, then pull that account's report. */
+  /** The four steps of the match-creator diagram. Step 3 always checks email agreement, and step 4 runs only while a platform is still missing. */
+  async #runSteps(platform: Platform, handle: string, creator: CreatorMatch, reads: CreatorReads): Promise<void> {
+    const start = await this.#readStart(platform, handle, creator, reads);
+    if (!start) return;
+
+    const confirmed = await this.#followProfileLinks(start, creator, reads);
+    const evidence = await this.#matchByEmail(creator, reads, [start.report, ...confirmed]);
+    if (creator.missing().length === 0) return;
+
+    await this.#trySameHandle(start, creator, reads, evidence);
+  }
+
+  /** Step 1: look up the handle on the start platform, free, then get its report. Not found ends the match. */
   async #readStart(platform: Platform, handle: string, creator: CreatorMatch, reads: CreatorReads): Promise<Start | undefined> {
     const me = await reads.account(platform, handle);
     if (!me) return undefined;
@@ -59,7 +66,7 @@ export class Matcher {
     };
   }
 
-  /** Steps 2 and 3: a linked account is a match only when its own report links back to the start. */
+  /** Step 2: follow the profile links. A linked account is a match only when its own report links back to the start. */
   async #followProfileLinks(start: Start, creator: CreatorMatch, reads: CreatorReads): Promise<ReportProfile[]> {
     const confirmed: ReportProfile[] = [];
     for (const other of PLATFORMS) {
@@ -106,7 +113,7 @@ export class Matcher {
     return [...ids];
   }
 
-  /** Step 4: one account per platform across the emails is a match; a shared address or a conflict gives candidates. */
+  /** Step 3: emails. Marks where matched accounts agree, and searches only while a platform is missing. One account per platform across the emails is a match; a shared address or a conflict gives candidates. */
   async #matchByEmail(creator: CreatorMatch, reads: CreatorReads, claimedOn: ReportProfile[]): Promise<EmailEvidence> {
     const claimed = claimedOn.flatMap((report) => [...emailsIn(report)]);
     const evidence = await searchEmailEvidence(creator, claimed, (emails) => reads.searchEmails(emails));
@@ -118,7 +125,7 @@ export class Matcher {
     return evidence;
   }
 
-  /** Step 5: an account with one of the start's names is a guess until its own report confirms it. */
+  /** Step 4: try the same handle. An account with one of the start's names is a guess until its own report confirms it. */
   async #trySameHandle(start: Start, creator: CreatorMatch, reads: CreatorReads, evidence: EmailEvidence): Promise<void> {
     for (const other of creator.missing()) {
       for (const name of start.names) {

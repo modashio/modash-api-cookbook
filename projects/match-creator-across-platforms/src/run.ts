@@ -90,9 +90,25 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   return 0;
 }
 
-// Checks everything before any file is written or any call is made, in two layers:
-// first where the answers come from, then the command's own values. Each layer reports all its problems in one message.
+// The input-checks diagram: read the arguments, then layer 1, then layer 2.
+// Nothing is written and no call is made before all three pass.
 function parseInput(argv: string[], env: NodeJS.ProcessEnv): Input | 'help' {
+  const args = readArgs(argv);
+  if (args === 'help') return 'help';
+  const { source, config } = checkSource(args.mock, env);
+  const { creators, budget } = checkCommand(args, source, config);
+  return { source, csv: args.command === 'match-csv', creators, budget };
+}
+
+interface Args {
+  command: Command;
+  values: string[];
+  mock: boolean;
+  maxCredits: string | undefined;
+}
+
+// Known flags, -h, and a known command.
+function readArgs(argv: string[]): Args | 'help' {
   let parsed;
   try {
     parsed = parseArgs({
@@ -109,16 +125,15 @@ function parseInput(argv: string[], env: NodeJS.ProcessEnv): Input | 'help' {
   }
   const { values, positionals } = parsed;
   if (values.help) return 'help';
-  const [command, ...args] = positionals;
-  if (!(COMMANDS as readonly string[]).includes(command ?? '')) {
+  const [command, ...rest] = positionals;
+  if (!isCommand(command)) {
     const problem = command === undefined ? 'Give a command.' : `Unknown command "${command}".`;
     throw new UsageError(`${problem} Use ${COMMANDS.join(' or ')}.\n\n${USAGE}`);
   }
-
-  const { source, config } = checkSource(values.mock, env);
-  const { creators, budget } = checkCommand(command as Command, args, values['max-credits'], source, config);
-  return { source, csv: command === 'match-csv', creators, budget };
+  return { command, values: rest, mock: values.mock, maxCredits: values['max-credits'] };
 }
+
+const isCommand = (value: string | undefined): value is Command => (COMMANDS as readonly (string | undefined)[]).includes(value);
 
 // Layer 1: the run has a source of answers, the fixtures with --mock or a token for the API.
 function checkSource(mock: boolean, env: NodeJS.ProcessEnv): { source: Source; config: Config } {
@@ -143,9 +158,7 @@ function checkSource(mock: boolean, env: NodeJS.ProcessEnv): { source: Source; c
 
 // Layer 2: the values the command was given.
 function checkCommand(
-  command: Command,
-  args: string[],
-  maxCredits: string | undefined,
+  { command, values: args, maxCredits }: Args,
   source: Source,
   config: Config,
 ): { creators: Creator[]; budget: number } {
