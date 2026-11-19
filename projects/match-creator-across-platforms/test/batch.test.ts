@@ -44,7 +44,7 @@ describe('batch run', () => {
       mode: resume('amy', 'bea'),
       onResult: (result) => matched.push(result.input.handle),
     });
-    assert.deepEqual(outcome, { ran: 1 });
+    assert.deepEqual(outcome, { ranCount: 1 });
     assert.deepEqual(matched, ['bea']);
     assert.deepEqual(recorded(resultsPath), ['amy finished', 'bea finished']);
   });
@@ -60,7 +60,7 @@ describe('batch run', () => {
       },
     });
     const outcome = await runBatch({ creators: creators('amy', 'bea', 'cat'), matcher, resultsPath, mode: resume('amy', 'bea', 'cat') });
-    assert.deepEqual(outcome, { ran: 1, stoppedAt: { handle: 'bea', error: stop } });
+    assert.deepEqual(outcome, { ranCount: 1, stoppedAt: { handle: 'bea', error: stop } });
     assert.deepEqual(recorded(resultsPath), ['amy finished']);
   });
 

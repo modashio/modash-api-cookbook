@@ -15,7 +15,7 @@ import {
   usersResponseSchema,
 } from './responses.js';
 
-export type MatchedEmail = NonNullable<z.infer<typeof emailSearchResponseSchema>['matchedEmails']>[number];
+export type MatchedEmail = z.infer<typeof emailSearchResponseSchema>['matchedEmails'][number];
 
 export interface ModashReads {
   readonly spent: number;
@@ -48,7 +48,7 @@ const getReport = (client: ModashClient, platform: Platform, userId: string) =>
 const searchEmails = (client: ModashClient, emails: string[]) =>
   client.call({ method: 'POST', path: 'email-search', body: { emails } }, emailSearchResponseSchema, {
     max: EMAIL_MATCH_COST * emails.length,
-    actual: (data) => EMAIL_MATCH_COST * Math.min((data.matchedEmails ?? []).length, emails.length),
+    actual: (data) => EMAIL_MATCH_COST * Math.min(data.matchedEmails.length, emails.length),
   });
 
 export function modashReads(client: ModashClient, reportsDir?: string): ModashReads {
@@ -73,10 +73,19 @@ export function modashReads(client: ModashClient, reportsDir?: string): ModashRe
 
     async searchEmails(emails) {
       const data = await searchEmails(client, emails);
-      return data.matchedEmails ?? [];
+      return data.matchedEmails;
     },
   };
 }
+
+/** The parsed file, or undefined when it is not valid JSON. The schema check after it reports the problem. */
+const readJson = (path: string): unknown => {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return undefined;
+  }
+};
 
 function fileCache(dir: string): ReportCache {
   const file = (platform: Platform, userId: string) => join(dir, `${platform}_${userId.replace(/[^A-Za-z0-9_-]/g, '')}.json`);
@@ -84,15 +93,10 @@ function fileCache(dir: string): ReportCache {
     get(platform, userId) {
       const path = file(platform, userId);
       if (!existsSync(path)) return undefined;
-      const parsed = reportProfileSchema.safeParse((() => {
-        try {
-          return JSON.parse(readFileSync(path, 'utf8'));
-        } catch {
-          return undefined;
-        }
-      })());
+      const parsed = reportProfileSchema.safeParse(readJson(path));
       if (parsed.success) return parsed.data;
-      unlinkSync(path); // a broken saved file: pull it again
+      console.warn(`${path} is broken, so the report is bought again for ${REPORT_COST} credit.`);
+      unlinkSync(path);
       return undefined;
     },
     set(platform, userId, report: ReportProfile) {

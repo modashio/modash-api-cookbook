@@ -9,7 +9,7 @@ export interface Account {
   username: string | null;
   followers: number | null;
   how: string;
-  email_agrees?: true;
+  emailAgrees?: true;
 }
 
 export interface Candidate extends Account {
@@ -79,7 +79,7 @@ export class CreatorMatch {
   }
 
   result(): MatchResult {
-    for (const platform of this.#emailEvidence?.agreeing() ?? []) this.#accounts[platform]!.email_agrees = true;
+    for (const platform of this.#emailEvidence?.agreeing() ?? []) this.#accounts[platform]!.emailAgrees = true;
     return {
       input: this.#input,
       accounts: this.#accounts,

@@ -19,7 +19,7 @@ export interface BatchOptions {
 }
 
 export interface BatchOutcome {
-  ran: number;
+  ranCount: number;
   stoppedAt?: { handle: string; error: CreditBudgetExceededError | ModashApiError };
 }
 
@@ -28,7 +28,7 @@ export async function runBatch({ creators, matcher, resultsPath, mode, onResult 
   const results = openResults(resultsPath, mode);
   const done = new Set(results.finished);
 
-  let ran = 0;
+  let ranCount = 0;
   for (const { platform, handle } of creators) {
     const key = creatorKey(platform, handle);
     if (done.has(key)) continue;
@@ -38,14 +38,14 @@ export async function runBatch({ creators, matcher, resultsPath, mode, onResult 
     try {
       result = await matcher.match(platform, handle);
     } catch (error) {
-      if (stopsTheRun(error)) return { ran, stoppedAt: { handle, error } };
+      if (stopsTheRun(error)) return { ranCount, stoppedAt: { handle, error } };
       throw error;
     }
     results.record(result);
     onResult?.(result);
-    ran += 1;
+    ranCount += 1;
   }
-  return { ran };
+  return { ranCount };
 }
 
 /** Reads a platform and a handle or profile link as the user typed them, or throws the reason it cannot. */

@@ -69,7 +69,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
       : new ModashClient(liveTransport(source.apiToken), { budget });
   const matcher = new Matcher(modashReads(client, mock ? undefined : join(outDir, 'reports')));
 
-  const { ran, stoppedAt } = await runBatch({
+  const { ranCount, stoppedAt } = await runBatch({
     creators,
     matcher,
     resultsPath: resultsFile,
@@ -84,7 +84,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   }
 
   const total = round2(client.spent);
-  if (ran === 0) print('Nothing new to run.');
+  if (ranCount === 0) print('Nothing new to run.');
   else if (mock) print(`Results in ${shown}. This was mock mode, so nothing was spent; a live run of the same creators costs ${total} credits.`);
   else print(`Results in ${shown}. Credits this run: ${total}`);
   return 0;
@@ -221,7 +221,7 @@ function checkCreator(platform: string, handle: string, mock: boolean): Creator 
   return creator;
 }
 
-export function summary(result: MatchResult, mock = false): string {
+function summary(result: MatchResult, mock = false): string {
   const lines = [`${result.input.platform} @${result.input.handle}  (${result.credits} credits${mock ? ' on a live run' : ''})`];
   for (const p of PLATFORMS) {
     const a = result.accounts[p];
@@ -230,7 +230,7 @@ export function summary(result: MatchResult, mock = false): string {
       continue;
     }
     const name = `@${a.username ?? a.userId}`.padEnd(29);
-    lines.push(`  ${p.padEnd(10)} ${name} ${String(a.followers ?? '').padStart(10)}  ${a.how}${a.email_agrees ? '  + email agrees' : ''}`);
+    lines.push(`  ${p.padEnd(10)} ${name} ${String(a.followers ?? '').padStart(10)}  ${a.how}${a.emailAgrees ? '  + email agrees' : ''}`);
   }
   for (const c of result.candidates) {
     lines.push(`  candidate  ${c.platform} @${c.username ?? c.userId} ${c.followers ?? ''}  ${c.how}`);

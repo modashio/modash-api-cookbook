@@ -38,38 +38,48 @@ export function openResults(path: string, mode: ResultsMode): ResultsFile {
         return;
       }
       const key = creatorKey(result.input.platform, result.input.handle);
-      const others = existsSync(path) ? readLines(path).filter((r) => r.key !== key) : [];
-      writeLines(path, [...others.map((r) => r.line), line]);
+      const others = existsSync(path) ? fileLines(path).filter((l) => readLine(l)?.key !== key) : [];
+      writeLines(path, [...others, line]);
     },
   };
 }
 
-/** Rewrites the file to one line per creator, the first finished one when there is one, and returns the finished creators. */
+/**
+ * Rewrites the file to one line per creator, the first finished one when there is one, and returns the finished creators.
+ * A line it cannot read stays, so nothing the user wrote is lost.
+ */
 function compact(path: string, toRun: Set<string>): Set<string> {
-  const rows = readLines(path).filter((r) => r.finished || !toRun.has(r.key));
+  const parsed = fileLines(path).map((line) => ({ line, row: readLine(line) }));
+  const unreadable = parsed.filter((p) => !p.row).map((p) => p.line);
+  const rows = parsed.flatMap((p) => p.row ?? []).filter((r) => r.finished || !toRun.has(r.key));
   const kept = uniqBy(
     sortBy(rows, (r) => !r.finished),
     'key',
   );
-  writeLines(
-    path,
-    kept.map((r) => r.line),
-  );
+  writeLines(path, [...unreadable, ...kept.map((r) => r.line)]);
   return new Set(kept.filter((r) => r.finished).map((r) => r.key));
 }
 
-function readLines(path: string): { key: string; line: string; finished: boolean }[] {
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .flatMap((line) => {
-      try {
-        const result = JSON.parse(line) as MatchResult;
-        return [{ key: creatorKey(result.input.platform, result.input.handle), line, finished: isFinished(result) }];
-      } catch {
-        return []; // a line cut off by a crash
-      }
-    });
+interface ResultLine {
+  key: string;
+  line: string;
+  finished: boolean;
 }
+
+/** One results line, or undefined when it is not a result: a line cut off by a crash, or one a person edited. */
+function readLine(line: string): ResultLine | undefined {
+  try {
+    const result = JSON.parse(line) as MatchResult;
+    return { key: creatorKey(result.input.platform, result.input.handle), line, finished: isFinished(result) };
+  } catch {
+    return undefined;
+  }
+}
+
+const fileLines = (path: string): string[] =>
+  readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '');
 
 export function writeAtomic(path: string, text: string): void {
   const tmp = `${path}.tmp`;

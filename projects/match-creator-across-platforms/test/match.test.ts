@@ -7,11 +7,11 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { handleFrom, idFrom } from '../src/contacts.js';
 import type { MatchResult } from '../src/creator-match.js';
 import { Matcher } from '../src/match.js';
-import { ModashClient, type Transport } from '../src/modash/client.js';
+import { liveTransport, ModashClient, type Transport } from '../src/modash/client.js';
 import { CreditBudgetExceededError, MockDataMissingError, ModashApiError, stopsTheRun } from '../src/modash/errors.js';
 import { fixtureKey, loadFixtures, mockTransport } from '../src/modash/mock.js';
 import { modashReads } from '../src/modash/reads.js';
-import { reportProfileSchema } from '../src/modash/responses.js';
+import { emailSearchResponseSchema, reportProfileSchema } from '../src/modash/responses.js';
 import { openResults } from '../src/results.js';
 import { parseCsv, run, UsageError } from '../src/run.js';
 import { memoryReads } from './memory-reads.js';
@@ -100,6 +100,24 @@ describe('reading contacts', () => {
 });
 
 describe('errors and credits', () => {
+  it('reports a page that is not JSON as an error, not as an empty answer', async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('<html>bad gateway</html>', { status: 200 });
+    try {
+      const reads = modashReads(new ModashClient(liveTransport('token'), { pauseMs: 0, budget: Infinity }));
+      await assert.rejects(reads.lookupAccounts('instagram', 'amy'), (e: unknown) => e instanceof ModashApiError && e.code === 'not_json');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('drops an email search match that has no email', () => {
+    const data = emailSearchResponseSchema.parse({
+      matchedEmails: [{ users: [{ userId: '1', platform: 'tiktok' }] }, { email: 'amy@x.com', users: [] }],
+    });
+    assert.deepEqual(data.matchedEmails.map((m) => m.email), ['amy@x.com']);
+  });
+
   it('stops the run only on a spent budget, a bad token, or an empty balance', () => {
     assert.equal(stopsTheRun(new CreditBudgetExceededError(1, 1)), true);
     assert.equal(stopsTheRun(new ModashApiError('x', 400, 'api_token_invalid', '')), true);
@@ -319,7 +337,7 @@ describe('matching', () => {
     });
     const r = await new Matcher(reads).match('instagram', 'amy');
     assert.equal(r.accounts.youtube, undefined);
-    assert.equal(r.accounts.instagram?.email_agrees, undefined);
+    assert.equal(r.accounts.instagram?.emailAgrees, undefined);
     assert.deepEqual(r.candidates.map((c) => c.userId), ['UCbea']);
   });
 
@@ -356,9 +374,9 @@ describe('matching', () => {
       ]),
     };
     const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
-    assert.equal(r.accounts.instagram?.email_agrees, true);
-    assert.equal(r.accounts.tiktok?.email_agrees, true);
-    assert.equal(r.accounts.youtube?.email_agrees, undefined);
+    assert.equal(r.accounts.instagram?.emailAgrees, true);
+    assert.equal(r.accounts.tiktok?.emailAgrees, true);
+    assert.equal(r.accounts.youtube?.emailAgrees, undefined);
   });
 
   it('does not accept an email that someone else lists on a platform already matched', async () => {
@@ -560,8 +578,8 @@ describe('matching', () => {
       ]),
     };
     const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
-    assert.equal(r.accounts.tiktok?.email_agrees, true);
-    assert.equal(r.accounts.instagram?.email_agrees, true);
+    assert.equal(r.accounts.tiktok?.emailAgrees, true);
+    assert.equal(r.accounts.instagram?.emailAgrees, true);
   });
 
   it('marks no email agreement on an address another account lists on a platform matched later', async () => {
@@ -589,8 +607,8 @@ describe('matching', () => {
     };
     const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.youtube?.userId, 'UC1');
-    assert.equal(r.accounts.tiktok?.email_agrees, undefined);
-    assert.equal(r.accounts.instagram?.email_agrees, undefined);
+    assert.equal(r.accounts.tiktok?.emailAgrees, undefined);
+    assert.equal(r.accounts.instagram?.emailAgrees, undefined);
   });
 
   it('takes the follower count of an email match from a report the tool holds', async () => {
@@ -640,9 +658,9 @@ describe('matching', () => {
       'GET youtube/profile/UC9/report': report('UC9', { handle: '@amy' }, linksBack),
     };
     const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
-    assert.equal(r.accounts.tiktok?.email_agrees, true);
-    assert.equal(r.accounts.youtube?.email_agrees, true);
-    assert.equal(r.accounts.instagram?.email_agrees, undefined);
+    assert.equal(r.accounts.tiktok?.emailAgrees, true);
+    assert.equal(r.accounts.youtube?.emailAgrees, true);
+    assert.equal(r.accounts.instagram?.emailAgrees, undefined);
   });
 
   it('lists an account once when two steps find it', async () => {
@@ -801,14 +819,14 @@ describe('command line', () => {
   });
 
 
-  it('keeps the first good result per creator when a run resumes', () => {
+  it('keeps the first good result per creator when a run resumes, and every line it cannot read', () => {
     const file = join(dir, 'results.jsonl');
     const line = (handle: string, errors: string[], credits: number) =>
       JSON.stringify({ input: { platform: 'instagram', handle }, accounts: {}, candidates: [], missing: [], credits, errors });
     writeFileSync(file, [line('amy', [], 1), line('bea', ['report failed'], 0), line('amy', [], 2), '{"cut off'].join('\n'));
     const results = openResults(file, { kind: 'resume', toRun: new Set(['instagram:amy', 'instagram:bea']) });
     assert.deepEqual([...results.finished], ['instagram:amy']);
-    assert.equal(readFileSync(file, 'utf8'), `${line('amy', [], 1)}\n`);
+    assert.equal(readFileSync(file, 'utf8'), `{"cut off\n${line('amy', [], 1)}\n`);
   });
 
   it('replaces only the line of the one creator a single-handle run records', () => {
@@ -821,9 +839,9 @@ describe('command line', () => {
       credits,
       errors: [],
     });
-    writeFileSync(file, `${JSON.stringify(result('amy', 1))}\n${JSON.stringify(result('bea', 1))}\n`);
+    writeFileSync(file, `${JSON.stringify(result('amy', 1))}\n{"cut off\n${JSON.stringify(result('bea', 1))}\n`);
     openResults(file, { kind: 'replace' }).record(result('amy', 2));
-    assert.equal(readFileSync(file, 'utf8'), `${JSON.stringify(result('bea', 1))}\n${JSON.stringify(result('amy', 2))}\n`);
+    assert.equal(readFileSync(file, 'utf8'), `{"cut off\n${JSON.stringify(result('bea', 1))}\n${JSON.stringify(result('amy', 2))}\n`);
   });
 
   it('keeps the failed result of a creator who is not in this run', () => {

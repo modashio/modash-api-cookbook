@@ -4,7 +4,7 @@ import * as z from 'zod';
 export const creditBudgetSchema = z.coerce.number().positive().finite();
 
 const environmentSchema = z.object({
-  MODASH_API_TOKEN: z.string().min(1).optional(),
+  MODASH_API_TOKEN: z.string().optional(),
   MODASH_CREDIT_BUDGET: creditBudgetSchema.default(50),
 });
 

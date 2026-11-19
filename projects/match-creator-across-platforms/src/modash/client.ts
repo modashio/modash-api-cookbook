@@ -32,13 +32,12 @@ export function liveTransport(token: string): Transport {
       signal: AbortSignal.timeout(60_000),
     });
     const text = await response.text();
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      return { status: response.status, body: JSON.parse(text) };
     } catch {
-      parsed = { raw: text.slice(0, 300) };
+      // A gateway or proxy page. It is not an answer, so `call` reports it as an error.
+      return { status: response.status, body: { error: true, code: 'not_json', message: text.slice(0, 300) } };
     }
-    return { status: response.status, body: parsed };
   };
 }
 

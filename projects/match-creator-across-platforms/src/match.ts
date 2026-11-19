@@ -71,13 +71,13 @@ export class Matcher {
     const confirmed: ReportProfile[] = [];
     for (const other of PLATFORMS) {
       if (other === start.platform) continue;
-      const linked: { account: Account; report: ReportProfile }[] = [];
+      const linked: { account: Omit<Account, 'how'>; report: ReportProfile }[] = [];
       for (const userId of await this.#linkedIds(start, other, reads)) {
         const report = await reads.report(other, userId);
         if (!report) continue;
         linked.push({
           report,
-          account: { userId, username: nameOf(report.profile), followers: report.profile?.followers ?? null, how: '' },
+          account: { userId, username: nameOf(report.profile), followers: report.profile?.followers ?? null },
         });
       }
       const [[match, ...alsoConfirmed], oneWay] = partition(linked, ({ report }) =>

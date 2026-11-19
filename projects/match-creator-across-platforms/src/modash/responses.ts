@@ -39,13 +39,15 @@ export const reportResponseSchema = z.looseObject({
   profile: reportProfileSchema,
 });
 
+const matchedEmailSchema = z.looseObject({
+  email: z.string().nullish(),
+  users: z.array(userRowSchema.extend({ platform: z.string().nullish() })).nullish(),
+});
+
+// A match without an email proves nothing, so it is dropped here, once.
 export const emailSearchResponseSchema = z.looseObject({
   matchedEmails: z
-    .array(
-      z.looseObject({
-        email: z.string().nullish(),
-        users: z.array(userRowSchema.extend({ platform: z.string().nullish() })).nullish(),
-      }),
-    )
-    .nullish(),
+    .array(matchedEmailSchema)
+    .nullish()
+    .transform((matches) => (matches ?? []).filter((m): m is typeof m & { email: string } => !!m.email?.trim())),
 });

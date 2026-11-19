@@ -85,9 +85,9 @@ export const pickAccount = (rows: UserRow[], wanted: string): FoundAccount | und
   );
 };
 
-export function emailsIn(report: ReportProfile | null | undefined): Set<string> {
+export function emailsIn(report: ReportProfile): Set<string> {
   const emails = new Set<string>();
-  for (const contact of report?.contacts ?? []) {
+  for (const contact of report.contacts) {
     if (contact.type === 'email') emails.add(contact.value.trim().toLowerCase());
   }
   return emails;

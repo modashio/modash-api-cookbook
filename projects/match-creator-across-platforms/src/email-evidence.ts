@@ -23,7 +23,7 @@ export const emailSearchHits = (matches: MatchedEmail[]): EmailSearchHit[] =>
     matches.flatMap(({ email, users }) =>
       (users ?? []).flatMap(({ platform, userId, followers, ...row }) =>
         userId && platform && isPlatform(platform)
-          ? [{ email: (email ?? '').toLowerCase(), platform, userId, username: nameOf(row), followers: followers ?? null }]
+          ? [{ email: email.trim().toLowerCase(), platform, userId, username: nameOf(row), followers: followers ?? null }]
           : [],
       ),
     ),
