@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { handleFrom, idFrom } from '../src/contacts.js';
 import { type MatchResult, Matcher } from '../src/match.js';
 import { ModashClient, type Transport } from '../src/modash/client.js';
-import { CreditBudgetExceededError, ModashApiError } from '../src/modash/errors.js';
+import { CreditBudgetExceededError, ModashApiError, stopsTheRun } from '../src/modash/errors.js';
 import { fixtureKey, mockTransport } from '../src/modash/mock.js';
 import { openResults } from '../src/results.js';
 import { parseCsv, run } from '../src/run.js';
@@ -81,12 +81,14 @@ describe('reading contacts', () => {
 });
 
 describe('errors and credits', () => {
-  it('treats only a bad token and an empty balance as fatal', () => {
-    assert.equal(new ModashApiError('x', 400, 'api_token_invalid', '').isFatal, true);
-    assert.equal(new ModashApiError('x', 402, 'not_enough_credits', '').isFatal, true);
-    assert.equal(new ModashApiError('x', 401, undefined, '').isFatal, true);
-    assert.equal(new ModashApiError('x', 403, 'feature_not_available', '').isFatal, false);
-    assert.equal(new ModashApiError('x', 404, 'account_not_found', '').isFatal, false);
+  it('stops the run only on a spent budget, a bad token, or an empty balance', () => {
+    assert.equal(stopsTheRun(new CreditBudgetExceededError(1, 1)), true);
+    assert.equal(stopsTheRun(new ModashApiError('x', 400, 'api_token_invalid', '')), true);
+    assert.equal(stopsTheRun(new ModashApiError('x', 402, 'not_enough_credits', '')), true);
+    assert.equal(stopsTheRun(new ModashApiError('x', 401, undefined, '')), true);
+    assert.equal(stopsTheRun(new ModashApiError('x', 403, 'feature_not_available', '')), false);
+    assert.equal(stopsTheRun(new ModashApiError('x', 404, 'account_not_found', '')), false);
+    assert.equal(stopsTheRun(new Error('network down')), false);
   });
 
   it('records a dead linked account and goes on', async () => {

@@ -4,7 +4,7 @@ import { EmailEvidence, type EmailListing } from './email-evidence.js';
 import { emailsIn, handleFrom, idFrom, isPlatform, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
 import { getReport, lookupUsers, searchEmails } from './modash/api.js';
 import type { ModashClient } from './modash/client.js';
-import { CreditBudgetExceededError, ModashApiError } from './modash/errors.js';
+import { stopsTheRun } from './modash/errors.js';
 import type { ReportProfile, UserRow } from './modash/responses.js';
 import { round2 } from './numbers.js';
 
@@ -84,8 +84,7 @@ export class Matcher {
     try {
       return await step();
     } catch (error) {
-      if (error instanceof CreditBudgetExceededError) throw error;
-      if (error instanceof ModashApiError && error.isFatal) throw error;
+      if (stopsTheRun(error)) throw error;
       this.#errors.push(`${what}: ${describe(error)}`);
       return undefined;
     }
@@ -120,8 +119,7 @@ export class Matcher {
         this.#markEmailAgreement(start, result);
       }
     } catch (error) {
-      if (error instanceof CreditBudgetExceededError) throw error;
-      if (error instanceof ModashApiError && error.isFatal) throw error;
+      if (stopsTheRun(error)) throw error;
       this.#errors.push(describe(error));
     }
     result.missing = PLATFORMS.filter((p) => !result.accounts[p]);

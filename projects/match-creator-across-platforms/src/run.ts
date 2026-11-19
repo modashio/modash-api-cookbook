@@ -6,7 +6,7 @@ import { loadConfig } from './config.js';
 import { handleFrom, isPlatform, PLATFORMS, type Platform } from './contacts.js';
 import { type MatchResult, Matcher, type ReportCache } from './match.js';
 import { liveTransport, ModashClient } from './modash/client.js';
-import { CreditBudgetExceededError, ModashApiError } from './modash/errors.js';
+import { stopsTheRun } from './modash/errors.js';
 import { MOCK_HANDLES, mockTransport } from './modash/mock.js';
 import { reportProfileSchema, type ReportProfile } from './modash/responses.js';
 import { round2 } from './numbers.js';
@@ -118,7 +118,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
     try {
       result = await matcher.match(platform, handle);
     } catch (error) {
-      if (error instanceof CreditBudgetExceededError || (error instanceof ModashApiError && error.isFatal)) {
+      if (stopsTheRun(error)) {
         print(`Stopped at @${handle}: ${error.message}`);
         print(`Credits this run: ${round2(client.spent)}`);
         print(`Finished creators are in ${shown}. Run the same command again to carry on.`);

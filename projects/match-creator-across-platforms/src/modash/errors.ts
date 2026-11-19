@@ -29,3 +29,7 @@ export class CreditBudgetExceededError extends Error {
     this.name = 'CreditBudgetExceededError';
   }
 }
+
+export function stopsTheRun(error: unknown): error is CreditBudgetExceededError | ModashApiError {
+  return error instanceof CreditBudgetExceededError || (error instanceof ModashApiError && error.isFatal);
+}
