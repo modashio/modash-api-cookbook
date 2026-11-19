@@ -43,7 +43,8 @@ export function liveTransport(token: string): Transport {
 }
 
 export interface ClientOptions {
-  budget?: number | undefined;
+  /** The most credits this client may spend. */
+  budget: number;
   /** Pause after each successful call, to stay under the rate limit. */
   pauseMs?: number;
   /** First retry wait; later retries wait 2x, 3x, 4x this. */
@@ -73,13 +74,13 @@ const isRetryLater = (response: ModashResponse) =>
 
 export class ModashClient {
   spent = 0;
-  readonly #budget: number | undefined;
+  readonly #budget: number;
   readonly #pauseMs: number;
   readonly #retryDelayMs: number;
 
   constructor(
     private readonly transport: Transport,
-    options: ClientOptions = {},
+    options: ClientOptions,
   ) {
     this.#budget = options.budget;
     this.#pauseMs = options.pauseMs ?? 600;
@@ -87,7 +88,7 @@ export class ModashClient {
   }
 
   async call<T>(request: ModashRequest, schema: z.ZodType<T>, cost: CallCost<T> = { max: 0 }): Promise<T> {
-    if (this.#budget !== undefined && this.spent + cost.max > this.#budget + 1e-9) {
+    if (this.spent + cost.max > this.#budget + 1e-9) {
       throw new CreditBudgetExceededError(this.#budget, this.spent);
     }
     this.spent += cost.max;

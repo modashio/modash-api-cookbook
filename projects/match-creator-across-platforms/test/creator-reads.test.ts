@@ -8,7 +8,7 @@ import { memoryReads } from './memory-reads.js';
 
 describe('creator reads', () => {
   it('counts only the credits spent after it was made', async () => {
-    const memory = memoryReads({ reports: [{ platform: 'instagram', userId: '1' }] });
+    const memory = memoryReads({ reports: [{ platform: 'instagram', userId: '1', contacts: [] }] });
     let spent = 3;
     const reads: ModashReads = {
       ...memory,

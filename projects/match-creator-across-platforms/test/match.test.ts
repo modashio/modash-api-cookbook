@@ -8,9 +8,10 @@ import { handleFrom, idFrom } from '../src/contacts.js';
 import type { MatchResult } from '../src/creator-match.js';
 import { Matcher } from '../src/match.js';
 import { ModashClient, type Transport } from '../src/modash/client.js';
-import { CreditBudgetExceededError, ModashApiError, stopsTheRun } from '../src/modash/errors.js';
-import { fixtureKey, mockTransport } from '../src/modash/mock.js';
+import { CreditBudgetExceededError, MockDataMissingError, ModashApiError, stopsTheRun } from '../src/modash/errors.js';
+import { fixtureKey, loadFixtures, mockTransport } from '../src/modash/mock.js';
 import { modashReads } from '../src/modash/reads.js';
+import { reportProfileSchema } from '../src/modash/responses.js';
 import { openResults } from '../src/results.js';
 import { parseCsv, run, UsageError } from '../src/run.js';
 import { memoryReads } from './memory-reads.js';
@@ -31,15 +32,19 @@ function fake(saved: Record<string, unknown>, fail: Record<string, [number, stri
   };
 }
 
-const client = (transport: Transport, budget?: number) => new ModashClient(transport, { budget, pauseMs: 0, retryDelayMs: 0 });
+const client = (transport: Transport, budget = Infinity) => new ModashClient(transport, { budget, pauseMs: 0, retryDelayMs: 0 });
 const amy = { 'GET instagram/users?query=amy': { users: [{ userId: '1', username: 'amy' }] } };
 const amyAccount = { platform: 'instagram', userId: '1', username: 'amy' } as const;
 const amyReport = (contacts: { type: string; value: string }[]) =>
   ({ platform: 'instagram', userId: '1', profile: { username: 'amy' }, contacts }) as const;
 
 describe('mock mode', () => {
+  it('stops on a request the mock data has no answer for', async () => {
+    await assert.rejects(new Matcher(modashReads(client(mockTransport({})))).match('instagram', 'amy'), MockDataMissingError);
+  });
+
   it('reproduces the sample output', async () => {
-    const matcher = new Matcher(modashReads(client(mockTransport())));
+    const matcher = new Matcher(modashReads(client(mockTransport(loadFixtures()))));
     for (const handle of ['example_baker', 'example_techreviews']) {
       const want = JSON.parse(
         readFileSync(new URL(`../sample-output/instagram_${handle}.json`, import.meta.url), 'utf8'),
@@ -50,6 +55,14 @@ describe('mock mode', () => {
 });
 
 describe('reading contacts', () => {
+  it('drops a contact with no value when the report comes in', () => {
+    const report = reportProfileSchema.parse({
+      contacts: [{ type: 'youtube', value: null }, { type: 'email' }, { type: 'tiktok', value: ' ' }, { type: 'tiktok', value: 'x' }],
+    });
+    assert.deepEqual(report.contacts, [{ type: 'tiktok', value: 'x' }]);
+    assert.deepEqual(reportProfileSchema.parse({}).contacts, []);
+  });
+
   it('reads handles from handles and profile URLs', () => {
     const cases: [Parameters<typeof handleFrom>[0], string, string][] = [
       ['instagram', 'https://www.instagram.com/bob.smith/', 'bob.smith'],
@@ -763,12 +776,16 @@ describe('command line', () => {
     );
   });
 
-  it('lists every bad parameter in one message before it starts', async () => {
-    const error = await run({ argv: ['match-creator', 'facebook', 'bob', '--max-credits', 'Infinity'], env: {}, cwd: dir, print }).catch((e) => e);
+  it('checks the source of answers first, then the command values', async () => {
+    const noToken = await run({ argv: ['match-creator', 'facebook', 'bob', '--max-credits', 'Infinity'], env: {}, cwd: dir, print }).catch((e) => e);
+    assert.ok(noToken instanceof UsageError);
+    assert.match(noToken.message, /^Set MODASH_API_TOKEN/);
+    assert.doesNotMatch(noToken.message, /facebook/);
+
+    const error = await run({ argv: ['match-creator', 'facebook', 'bob', '--max-credits', 'Infinity'], env: { MODASH_API_TOKEN: 'abc' }, cwd: dir, print }).catch((e) => e);
     assert.ok(error instanceof UsageError);
     assert.match(error.message, /The run did not start/);
     assert.match(error.message, /"facebook" is not a platform/);
-    assert.match(error.message, /MODASH_API_TOKEN/);
     assert.match(error.message, /--max-credits must be a number above 0, got "Infinity"/);
     assert.equal(existsSync(join(dir, 'output')), false);
   });

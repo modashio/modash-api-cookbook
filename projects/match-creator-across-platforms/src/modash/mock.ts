@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 import type { ModashRequest, Transport } from './client.js';
+import { MockDataMissingError } from './errors.js';
 
 const FIXTURES = new URL('../../fixtures/demo-responses.json', import.meta.url);
 
@@ -13,23 +14,17 @@ export function fixtureKey({ method, path, query, body }: ModashRequest): string
   return key;
 }
 
-export function mockTransport(fixtures: Record<string, unknown> = loadFixtures()): Transport {
+export type Fixtures = Record<string, unknown>;
+
+/** Every request in mock mode must have a saved answer. A missing one is a bug in the fixtures, so the run stops. */
+export function mockTransport(fixtures: Fixtures): Transport {
   return async (request) => {
-    const body = fixtures[fixtureKey(request)];
-    if (body === undefined) {
-      return {
-        status: 404,
-        body: {
-          error: true,
-          code: 'account_not_found',
-          message: `not in the mock data, which has ${MOCK_HANDLES.join(' and ')}`,
-        },
-      };
-    }
-    return { status: 200, body };
+    const key = fixtureKey(request);
+    if (!(key in fixtures)) throw new MockDataMissingError(key);
+    return { status: 200, body: fixtures[key] };
   };
 }
 
-function loadFixtures(): Record<string, unknown> {
-  return JSON.parse(readFileSync(FIXTURES, 'utf8')) as Record<string, unknown>;
+export function loadFixtures(): Fixtures {
+  return JSON.parse(readFileSync(FIXTURES, 'utf8')) as Fixtures;
 }

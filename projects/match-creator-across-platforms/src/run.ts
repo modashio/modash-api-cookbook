@@ -8,7 +8,7 @@ import { PLATFORMS } from './contacts.js';
 import type { MatchResult } from './creator-match.js';
 import { Matcher } from './match.js';
 import { liveTransport, ModashClient } from './modash/client.js';
-import { MOCK_HANDLES, mockTransport } from './modash/mock.js';
+import { type Fixtures, loadFixtures, MOCK_HANDLES, mockTransport } from './modash/mock.js';
 import { modashReads } from './modash/reads.js';
 import { round2 } from './numbers.js';
 import { creatorKey, type ResultsMode } from './results.js';
@@ -34,12 +34,14 @@ type Command = (typeof COMMANDS)[number];
 
 export class UsageError extends Error {}
 
+/** Where the answers come from: the demo fixtures with --mock, else the API with a token. */
+type Source = { kind: 'mock'; fixtures: Fixtures } | { kind: 'live'; apiToken: string };
+
 interface Input {
+  source: Source;
   csv: boolean;
   creators: Creator[];
-  mock: boolean;
   budget: number;
-  apiToken: string | undefined;
 }
 
 export async function run({ argv, env = process.env, cwd = process.cwd(), print = console.log }: RunOptions): Promise<number> {
@@ -48,7 +50,8 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
     print(USAGE);
     return 0;
   }
-  const { csv, creators, mock, budget, apiToken } = input;
+  const { source, csv, creators, budget } = input;
+  const mock = source.kind === 'mock';
 
   // Mock mode starts the file over, a CSV resumes it, and a single handle replaces its own line.
   const mode: ResultsMode = mock
@@ -60,9 +63,10 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   const outDir = join(cwd, 'output');
   const resultsFile = join(outDir, mock ? 'mock-results.jsonl' : 'results.jsonl');
   const shown = relative(cwd, resultsFile);
-  const client = mock
-    ? new ModashClient(mockTransport(), { pauseMs: 0, budget })
-    : new ModashClient(liveTransport(apiToken!), { budget });
+  const client =
+    source.kind === 'mock'
+      ? new ModashClient(mockTransport(source.fixtures), { pauseMs: 0, budget })
+      : new ModashClient(liveTransport(source.apiToken), { budget });
   const matcher = new Matcher(modashReads(client, mock ? undefined : join(outDir, 'reports')));
 
   const { ran, stoppedAt } = await runBatch({
@@ -86,7 +90,8 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   return 0;
 }
 
-// Checks every parameter before any file is written or any call is made, and reports all the problems in one message.
+// Checks everything before any file is written or any call is made, in two layers:
+// first where the answers come from, then the command's own values. Each layer reports all its problems in one message.
 function parseInput(argv: string[], env: NodeJS.ProcessEnv): Input | 'help' {
   let parsed;
   try {
@@ -110,8 +115,42 @@ function parseInput(argv: string[], env: NodeJS.ProcessEnv): Input | 'help' {
     throw new UsageError(`${problem} Use ${COMMANDS.join(' or ')}.\n\n${USAGE}`);
   }
 
-  const csv = (command as Command) === 'match-csv';
-  const mock = values.mock;
+  const { source, config } = checkSource(values.mock, env);
+  const { creators, budget } = checkCommand(command as Command, args, values['max-credits'], source, config);
+  return { source, csv: command === 'match-csv', creators, budget };
+}
+
+// Layer 1: the run has a source of answers, the fixtures with --mock or a token for the API.
+function checkSource(mock: boolean, env: NodeJS.ProcessEnv): { source: Source; config: Config } {
+  let config: Config;
+  try {
+    config = loadConfig(env);
+  } catch (error) {
+    throw new UsageError((error as Error).message);
+  }
+  if (mock) {
+    try {
+      return { source: { kind: 'mock', fixtures: loadFixtures() }, config };
+    } catch (error) {
+      throw new UsageError(`could not read the mock data: ${(error as Error).message}`);
+    }
+  }
+  if (!config.apiToken) {
+    throw new UsageError('Set MODASH_API_TOKEN (in .env or your shell) to run live. To try it without a token, run npm run dev.');
+  }
+  return { source: { kind: 'live', apiToken: config.apiToken }, config };
+}
+
+// Layer 2: the values the command was given.
+function checkCommand(
+  command: Command,
+  args: string[],
+  maxCredits: string | undefined,
+  source: Source,
+  config: Config,
+): { creators: Creator[]; budget: number } {
+  const csv = command === 'match-csv';
+  const mock = source.kind === 'mock';
   const problems: string[] = [];
   let showUsage = false;
 
@@ -128,18 +167,7 @@ function parseInput(argv: string[], env: NodeJS.ProcessEnv): Input | 'help' {
     }
   }
 
-  let config: Config | undefined;
-  try {
-    config = loadConfig(env);
-  } catch (error) {
-    problems.push((error as Error).message);
-  }
-  if (config && !mock && !config.apiToken) {
-    problems.push('Set MODASH_API_TOKEN (in .env or your shell) to run live. To try it without a token, run npm run dev.');
-  }
-
-  let budget = config?.creditBudget ?? 0;
-  const maxCredits = values['max-credits'];
+  let budget = config.creditBudget;
   if (maxCredits !== undefined) {
     const parsedBudget = creditBudgetSchema.safeParse(maxCredits);
     if (parsedBudget.success) budget = parsedBudget.data;
@@ -150,7 +178,7 @@ function parseInput(argv: string[], env: NodeJS.ProcessEnv): Input | 'help' {
     const message = problems.length === 1 ? problems[0]! : `The run did not start:\n${problems.map((p) => `  - ${p}`).join('\n')}`;
     throw new UsageError(showUsage ? `${message}\n\n${USAGE}` : message);
   }
-  return { csv, creators, mock, budget, apiToken: config!.apiToken };
+  return { creators, budget };
 }
 
 const BAD_ROWS_SHOWN = 20;

@@ -22,10 +22,16 @@ const contactSchema = z.looseObject({
   value: z.string().nullish(),
 });
 
+// The report may leave out a contact's value. A contact without one says nothing, so it is dropped here, once.
+const contactsSchema = z
+  .array(contactSchema)
+  .nullish()
+  .transform((contacts) => (contacts ?? []).filter((c): c is typeof c & { value: string } => !!c.value?.trim()));
+
 export const reportProfileSchema = z.looseObject({
   userId: id.nullish(),
   profile: userRowSchema.nullish(),
-  contacts: z.array(contactSchema).nullish(),
+  contacts: contactsSchema,
 });
 export type ReportProfile = z.infer<typeof reportProfileSchema>;
 

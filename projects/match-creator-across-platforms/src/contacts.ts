@@ -23,8 +23,7 @@ const NOT_A_PROFILE = new Set([
 ]);
 
 /** A profile link that carries an account id the report endpoint takes, so no lookup is needed. */
-export function idFrom(platform: Platform, value: string | null | undefined): string | undefined {
-  if (!value) return undefined;
+export function idFrom(platform: Platform, value: string): string | undefined {
   const match =
     platform === 'youtube'
       ? /youtube\.com\/channel\/(UC[A-Za-z0-9_-]{20,})/.exec(value.replace(/youtube\.com/i, 'youtube.com'))
@@ -35,8 +34,8 @@ export function idFrom(platform: Platform, value: string | null | undefined): st
 }
 
 /** The handle in a contact, in lower case, or undefined when it carries an id, points elsewhere, or is a post or tab. */
-export function handleFrom(platform: Platform, value: string | null | undefined): string | undefined {
-  if (!value || idFrom(platform, value)) return undefined;
+export function handleFrom(platform: Platform, value: string): string | undefined {
+  if (idFrom(platform, value)) return undefined;
   const trimmed = value.trim();
   const hadScheme = /^https?:\/\//i.test(trimmed);
   const path = trimmed.replace(/^https?:\/\//i, '').split(/[?#]/)[0] ?? '';
@@ -89,7 +88,7 @@ export const pickAccount = (rows: UserRow[], wanted: string): FoundAccount | und
 export function emailsIn(report: ReportProfile | null | undefined): Set<string> {
   const emails = new Set<string>();
   for (const contact of report?.contacts ?? []) {
-    if (contact.type === 'email' && contact.value) emails.add(contact.value.trim().toLowerCase());
+    if (contact.type === 'email') emails.add(contact.value.trim().toLowerCase());
   }
   return emails;
 }

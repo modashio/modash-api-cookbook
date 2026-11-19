@@ -30,6 +30,14 @@ export class CreditBudgetExceededError extends Error {
   }
 }
 
+/** Mock mode asked for an answer the fixtures do not have. This is a bug, not an API answer, so nothing catches it. */
+export class MockDataMissingError extends Error {
+  constructor(key: string) {
+    super(`the mock data has no answer for "${key}"`);
+    this.name = 'MockDataMissingError';
+  }
+}
+
 export function stopsTheRun(error: unknown): error is CreditBudgetExceededError | ModashApiError {
   return error instanceof CreditBudgetExceededError || (error instanceof ModashApiError && error.isFatal);
 }

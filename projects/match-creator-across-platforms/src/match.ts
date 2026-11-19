@@ -20,7 +20,7 @@ export class Matcher {
   constructor(private readonly reads: ModashReads) {}
 
   static pointsBack(report: ReportProfile, platform: Platform, startNames: Set<string>, startId: string): boolean {
-    return (report.contacts ?? []).some(
+    return report.contacts.some(
       (c) =>
         c.type === platform &&
         (startNames.has(handleFrom(platform, c.value) ?? '') || idFrom(platform, c.value) === startId),
@@ -92,8 +92,8 @@ export class Matcher {
 
   async #linkedIds(start: Start, other: Platform, reads: CreatorReads): Promise<string[]> {
     const ids = new Set<string>();
-    for (const contact of start.report.contacts ?? []) {
-      if (contact.type !== other || !contact.value) continue;
+    for (const contact of start.report.contacts) {
+      if (contact.type !== other) continue;
       const id = idFrom(other, contact.value);
       if (id) {
         ids.add(id);

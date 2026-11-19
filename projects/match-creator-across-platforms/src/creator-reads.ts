@@ -1,6 +1,6 @@
 import { type FoundAccount, pickAccount, type Platform } from './contacts.js';
 import { type EmailSearchHit, emailSearchHits } from './email-evidence.js';
-import { stopsTheRun } from './modash/errors.js';
+import { MockDataMissingError, stopsTheRun } from './modash/errors.js';
 import type { ModashReads } from './modash/reads.js';
 import type { ReportProfile } from './modash/responses.js';
 import { round2 } from './numbers.js';
@@ -35,9 +35,9 @@ export class CreatorReads {
     return round2(this.#reads.spent - this.#spentBefore);
   }
 
-  /** Lets an error that stops the run through, and records any other one. */
+  /** Lets an error that stops the run, or a mock-data bug, through, and records any other one. */
   fail(error: unknown, what?: string): void {
-    if (stopsTheRun(error)) throw error;
+    if (stopsTheRun(error) || error instanceof MockDataMissingError) throw error;
     this.#errors.push(what === undefined ? describe(error) : `${what}: ${describe(error)}`);
   }
 
