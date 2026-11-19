@@ -1,11 +1,10 @@
 import { groupBy, partition, uniqBy } from 'lodash-es';
 
 import { CreatorMatch } from './creator-match.js';
-import { emailsIn, handleFrom, idFrom, isPlatform, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
-import { getReport, lookupUsers, searchEmails } from './modash/api.js';
-import type { ModashClient } from './modash/client.js';
+import { emailsIn, handleFrom, idFrom, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
 import { stopsTheRun } from './modash/errors.js';
-import type { ReportProfile, UserRow } from './modash/responses.js';
+import type { ModashReads } from './modash/reads.js';
+import type { ReportProfile } from './modash/responses.js';
 import { round2 } from './numbers.js';
 
 export interface Account {
@@ -29,13 +28,6 @@ export interface MatchResult {
   errors: string[];
 }
 
-export interface ReportCache {
-  get(platform: Platform, userId: string): ReportProfile | undefined;
-  set(platform: Platform, userId: string, report: ReportProfile): void;
-}
-
-type Found = UserRow & { userId: string };
-
 /** The account the run started from, and what its report says about it. */
 interface Start {
   platform: Platform;
@@ -52,28 +44,7 @@ function describe(error: unknown): string {
 }
 
 export class Matcher {
-  constructor(
-    private readonly client: ModashClient,
-    private readonly cache?: ReportCache,
-  ) {}
-
-  /** The lookup can return more than one account; keep the exact handle, and a current handle over an older name. */
-  async lookup(platform: Platform, handle: string): Promise<Found | undefined> {
-    const data = await lookupUsers(this.client, platform, handle);
-    const wanted = handle.toLowerCase();
-    const rows = (data.users ?? []).filter((row): row is Found => !!row.userId);
-    return (
-      rows.find((row) => (nameOf(row) ?? '').toLowerCase() === wanted) ?? rows.find((row) => namesOf(row).has(wanted))
-    );
-  }
-
-  async report(platform: Platform, userId: string): Promise<ReportProfile> {
-    const cached = this.cache?.get(platform, userId);
-    if (cached) return cached;
-    const data = await getReport(this.client, platform, userId);
-    this.cache?.set(platform, userId, data.profile);
-    return data.profile;
-  }
+  constructor(private readonly reads: ModashReads) {}
 
   async #safe<T>(creator: CreatorMatch, what: string, step: () => Promise<T>): Promise<T | undefined> {
     try {
@@ -94,7 +65,7 @@ export class Matcher {
   }
 
   async match(platform: Platform, handle: string): Promise<MatchResult> {
-    const spentBefore = this.client.spent;
+    const spentBefore = this.reads.spent;
     const creator = new CreatorMatch(platform, handle);
     try {
       const start = await this.#readStart(platform, handle, creator);
@@ -108,12 +79,12 @@ export class Matcher {
       if (stopsTheRun(error)) throw error;
       creator.fail(describe(error));
     }
-    return creator.result(round2(this.client.spent - spentBefore));
+    return creator.result(round2(this.reads.spent - spentBefore));
   }
 
   /** Step 1: turn the handle into an id, then pull that account's report. */
   async #readStart(platform: Platform, handle: string, creator: CreatorMatch): Promise<Start | undefined> {
-    const me = await this.#safe(creator, `lookup ${platform} @${handle}`, () => this.lookup(platform, handle));
+    const me = await this.#safe(creator, `lookup ${platform} @${handle}`, () => this.reads.findAccount(platform, handle));
     if (!me) return undefined;
     const report = await this.#tryReport(creator, platform, me.userId);
     const followers = report?.profile?.followers ?? me.followers ?? null;
@@ -168,7 +139,7 @@ export class Matcher {
       }
       const handle = handleFrom(other, contact.value);
       const row = handle
-        ? await this.#safe(creator, `lookup ${other} @${handle}`, () => this.lookup(other, handle))
+        ? await this.#safe(creator, `lookup ${other} @${handle}`, () => this.reads.findAccount(other, handle))
         : undefined;
       if (row) ids.add(row.userId);
     }
@@ -180,21 +151,10 @@ export class Matcher {
     const missing = creator.missing();
     const claimed = creator.claimed;
     if (missing.length === 0 || claimed.length === 0) return;
-    const data = await this.#safe(creator, 'email search', () => searchEmails(this.client, claimed));
-
-    const rows = uniqBy(
-      (data?.matchedEmails ?? []).flatMap(({ email, users }) =>
-        (users ?? []).flatMap(({ platform, userId, followers, ...row }) =>
-          userId && platform && isPlatform(platform)
-            ? [{ email: (email ?? '').toLowerCase(), platform, userId, username: nameOf(row), followers: followers ?? null }]
-            : [],
-        ),
-      ),
-      (row) => `${row.email}:${row.platform}:${row.userId}`,
-    );
-    creator.recordSearch(data && rows);
+    const rows = await this.#safe(creator, 'email search', () => this.reads.searchEmails(claimed));
+    creator.recordSearch(rows);
     const sharedEmails = creator.sharedEmails();
-    const [sharedRows, ownRows] = partition(rows, (row) => sharedEmails.has(row.email));
+    const [sharedRows, ownRows] = partition(rows ?? [], (row) => sharedEmails.has(row.email));
     const byPlatform = groupBy(
       ownRows.filter((row) => missing.includes(row.platform)),
       'platform',
@@ -221,7 +181,7 @@ export class Matcher {
     for (const other of creator.missing()) {
       for (const name of start.names) {
         if (creator.account(other)) break;
-        const row = await this.#safe(creator, `lookup ${other} @${name}`, () => this.lookup(other, name));
+        const row = await this.#safe(creator, `lookup ${other} @${name}`, () => this.reads.findAccount(other, name));
         if (!row) continue;
         const back = await this.#tryReport(creator, other, row.userId);
         const followers = back?.profile?.followers ?? row.followers ?? null;
@@ -240,7 +200,7 @@ export class Matcher {
 
   #tryReport(creator: CreatorMatch, platform: Platform, userId: string): Promise<ReportProfile | undefined> {
     return creator.reportOnce(platform, userId, () =>
-      this.#safe(creator, `report ${platform} ${userId}`, () => this.report(platform, userId)),
+      this.#safe(creator, `report ${platform} ${userId}`, () => this.reads.report(platform, userId)),
     );
   }
 }

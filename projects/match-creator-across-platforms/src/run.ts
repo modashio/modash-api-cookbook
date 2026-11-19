@@ -1,16 +1,16 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { loadConfig } from './config.js';
 import { handleFrom, isPlatform, PLATFORMS, type Platform } from './contacts.js';
-import { type MatchResult, Matcher, type ReportCache } from './match.js';
+import { type MatchResult, Matcher } from './match.js';
 import { liveTransport, ModashClient } from './modash/client.js';
 import { stopsTheRun } from './modash/errors.js';
 import { MOCK_HANDLES, mockTransport } from './modash/mock.js';
-import { reportProfileSchema, type ReportProfile } from './modash/responses.js';
+import { modashReads } from './modash/reads.js';
 import { round2 } from './numbers.js';
-import { creatorKey, openResults, type ResultsMode, writeAtomic } from './results.js';
+import { creatorKey, openResults, type ResultsMode } from './results.js';
 
 export interface RunOptions {
   argv: string[];
@@ -95,7 +95,7 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   const client = mock
     ? new ModashClient(mockTransport(), { pauseMs: 0 })
     : new ModashClient(liveTransport(config.apiToken!), { budget });
-  const matcher = new Matcher(client, mock ? undefined : fileCache(join(outDir, 'reports')));
+  const matcher = new Matcher(modashReads(client, mock ? undefined : join(outDir, 'reports')));
 
   const results = openResults(resultsFile, resultsMode(mock, values.csv !== undefined, todo));
   const done = new Set(results.finished);
@@ -232,28 +232,4 @@ export function parseCsv(text: string): string[][] {
     rows.push(row);
   }
   return rows;
-}
-
-function fileCache(dir: string): ReportCache {
-  const file = (platform: Platform, userId: string) => join(dir, `${platform}_${userId.replace(/[^A-Za-z0-9_-]/g, '')}.json`);
-  return {
-    get(platform, userId) {
-      const path = file(platform, userId);
-      if (!existsSync(path)) return undefined;
-      const parsed = reportProfileSchema.safeParse((() => {
-        try {
-          return JSON.parse(readFileSync(path, 'utf8'));
-        } catch {
-          return undefined;
-        }
-      })());
-      if (parsed.success) return parsed.data;
-      unlinkSync(path); // a broken saved file: pull it again
-      return undefined;
-    },
-    set(platform, userId, report: ReportProfile) {
-      mkdirSync(dir, { recursive: true });
-      writeAtomic(file(platform, userId), JSON.stringify(report));
-    },
-  };
 }

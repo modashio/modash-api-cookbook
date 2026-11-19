@@ -116,7 +116,7 @@ shared email` it is that same email.
 | `POST /v1/email-search` with `{"emails": [...]}` | Instagram, TikTok and YouTube accounts that list one of those emails | 0.02 credits per email that matches |
 
 `{platform}` is `instagram`, `tiktok` or `youtube`. Every call takes the header
-`Authorization: Bearer <your token>`. All of them, with their costs, live in [`src/modash/api.ts`](./src/modash/api.ts), and every
+`Authorization: Bearer <your token>`. All of them, with their costs, live in [`src/modash/reads.ts`](./src/modash/reads.ts), and every
 request goes through [`src/modash/client.ts`](./src/modash/client.ts), which holds the budget, retries
 and error handling.
 

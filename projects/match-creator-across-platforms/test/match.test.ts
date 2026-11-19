@@ -9,8 +9,10 @@ import { type MatchResult, Matcher } from '../src/match.js';
 import { ModashClient, type Transport } from '../src/modash/client.js';
 import { CreditBudgetExceededError, ModashApiError, stopsTheRun } from '../src/modash/errors.js';
 import { fixtureKey, mockTransport } from '../src/modash/mock.js';
+import { modashReads } from '../src/modash/reads.js';
 import { openResults } from '../src/results.js';
 import { parseCsv, run } from '../src/run.js';
+import { memoryReads } from './memory-reads.js';
 
 const report = (userId: string, profile: object, contacts: object[]) => ({
   error: false,
@@ -30,10 +32,13 @@ function fake(saved: Record<string, unknown>, fail: Record<string, [number, stri
 
 const client = (transport: Transport, budget?: number) => new ModashClient(transport, { budget, pauseMs: 0, retryDelayMs: 0 });
 const amy = { 'GET instagram/users?query=amy': { users: [{ userId: '1', username: 'amy' }] } };
+const amyAccount = { platform: 'instagram', userId: '1', username: 'amy' } as const;
+const amyReport = (contacts: { type: string; value: string }[]) =>
+  ({ platform: 'instagram', userId: '1', profile: { username: 'amy' }, contacts }) as const;
 
 describe('mock mode', () => {
   it('reproduces the sample output', async () => {
-    const matcher = new Matcher(client(mockTransport()));
+    const matcher = new Matcher(modashReads(client(mockTransport())));
     for (const handle of ['example_baker', 'example_techreviews']) {
       const want = JSON.parse(
         readFileSync(new URL(`../sample-output/instagram_${handle}.json`, import.meta.url), 'utf8'),
@@ -101,7 +106,7 @@ describe('errors and credits', () => {
       'GET youtube/users?query=amy': { users: [] },
     };
     const c = client(fake(saved));
-    const r = await new Matcher(c).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(c)).match('instagram', 'amy');
     assert.deepEqual(r.missing, ['tiktok', 'youtube']);
     assert.equal(r.errors.length, 1);
     assert.match(r.errors[0]!, /report tiktok 9/);
@@ -110,13 +115,13 @@ describe('errors and credits', () => {
 
   it('stops on a bad token', async () => {
     const t = fake({}, { 'GET instagram/users?query=amy': [401, 'api_token_invalid'] });
-    await assert.rejects(new Matcher(client(t)).match('instagram', 'amy'), ModashApiError);
+    await assert.rejects(new Matcher(modashReads(client(t))).match('instagram', 'amy'), ModashApiError);
   });
 
   it('stops before a call that could go over budget', async () => {
     const saved = { ...amy, 'GET instagram/profile/1/report': report('1', { username: 'amy' }, []) };
     const c = client(fake(saved), 0.5);
-    await assert.rejects(new Matcher(c).match('instagram', 'amy'), CreditBudgetExceededError);
+    await assert.rejects(new Matcher(modashReads(c)).match('instagram', 'amy'), CreditBudgetExceededError);
     assert.equal(c.spent, 0);
   });
 
@@ -126,13 +131,13 @@ describe('errors and credits', () => {
       'GET instagram/profile/1/report': report('1', { username: 'amy' }, [{ type: 'email', value: 'a@example.com' }]),
     };
     const c = client(fake(saved), 1.01);
-    await assert.rejects(new Matcher(c).match('instagram', 'amy'), CreditBudgetExceededError);
+    await assert.rejects(new Matcher(modashReads(c)).match('instagram', 'amy'), CreditBudgetExceededError);
     assert.equal(c.spent, 1);
   });
 
   it('does not charge a failed report', async () => {
     const c = client(fake(amy, { 'GET instagram/profile/1/report': [404, 'account_removed'] }));
-    await new Matcher(c).match('instagram', 'amy');
+    await new Matcher(modashReads(c)).match('instagram', 'amy');
     assert.equal(c.spent, 0);
   });
 
@@ -142,7 +147,7 @@ describe('errors and credits', () => {
       calls += 1;
       return calls < 3 ? { status: 503, body: {} } : { status: 200, body: { users: [] } };
     };
-    await new Matcher(client(t)).lookup('instagram', 'amy');
+    await modashReads(client(t)).findAccount('instagram', 'amy');
     assert.equal(calls, 3);
   });
 
@@ -152,7 +157,7 @@ describe('errors and credits', () => {
       calls += 1;
       return { status: 503, body: { error: true, code: 'retry_later', message: 'test' } };
     };
-    await assert.rejects(new Matcher(client(t)).report('instagram', '1'), ModashApiError);
+    await assert.rejects(modashReads(client(t)).report('instagram', '1'), ModashApiError);
     assert.equal(calls, 1);
   });
 
@@ -162,7 +167,7 @@ describe('errors and credits', () => {
       calls += 1;
       throw new TypeError('x is undefined');
     };
-    await assert.rejects(new Matcher(client(t)).lookup('instagram', 'amy'), TypeError);
+    await assert.rejects(modashReads(client(t)).findAccount('instagram', 'amy'), TypeError);
     assert.equal(calls, 1);
   });
 
@@ -173,7 +178,7 @@ describe('errors and credits', () => {
       if (calls < 2) throw new DOMException('timed out', 'TimeoutError');
       return { status: 200, body: { users: [] } };
     };
-    await new Matcher(client(t)).lookup('instagram', 'amy');
+    await modashReads(client(t)).findAccount('instagram', 'amy');
     assert.equal(calls, 2);
   });
 
@@ -184,7 +189,7 @@ describe('errors and credits', () => {
       throw new DOMException('timed out', 'TimeoutError');
     };
     const c = client(t);
-    await assert.rejects(new Matcher(c).report('instagram', '1'), DOMException);
+    await assert.rejects(modashReads(c).report('instagram', '1'), DOMException);
     assert.equal(calls, 1);
     assert.equal(c.spent, 1);
   });
@@ -196,7 +201,7 @@ describe('errors and credits', () => {
       throw new TypeError('fetch failed');
     };
     const c = client(t);
-    await assert.rejects(new Matcher(c).report('instagram', '1'), TypeError);
+    await assert.rejects(modashReads(c).report('instagram', '1'), TypeError);
     assert.equal(calls, 1);
     assert.equal(c.spent, 1);
   });
@@ -204,7 +209,7 @@ describe('errors and credits', () => {
   it('keeps the charge for a 200 that carries an error', async () => {
     const t: Transport = async () => ({ status: 200, body: { error: true, code: 'internal_server_error' } });
     const c = client(t);
-    await assert.rejects(new Matcher(c).report('instagram', '1'), ModashApiError);
+    await assert.rejects(modashReads(c).report('instagram', '1'), ModashApiError);
     assert.equal(c.spent, 1);
   });
 
@@ -221,14 +226,14 @@ describe('errors and credits', () => {
       if (request.path === 'tiktok/profile/9/report') reports += 1;
       return inner(request);
     };
-    const r = await new Matcher(client(t)).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(t))).match('instagram', 'amy');
     assert.equal(reports, 1);
     assert.deepEqual(r.candidates.map((c) => c.how), ['same handle, report failed']);
   });
 
   it('keeps the charge for a billed 200 with the wrong shape', async () => {
     const c = client(fake({ ...amy, 'GET instagram/profile/1/report': { error: false, profile: 'oops' } }));
-    await new Matcher(c).match('instagram', 'amy');
+    await new Matcher(modashReads(c)).match('instagram', 'amy');
     assert.equal(c.spent, 1);
   });
 });
@@ -246,7 +251,7 @@ describe('matching', () => {
         { type: 'youtube', value: 'https://www.youtube.com/@newname' },
       ]),
     };
-    const r = await new Matcher(client(fake(saved))).match('youtube', 'oldname');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('youtube', 'oldname');
     assert.equal(r.accounts.instagram?.how, 'confirmed both ways');
   });
 
@@ -260,7 +265,7 @@ describe('matching', () => {
       'GET tiktok/profile/8/report': report('8', { username: 'notamy' }, []),
       'GET tiktok/profile/9/report': report('9', { username: 'amy' }, [{ type: 'instagram', value: 'instagram.com/amy' }]),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok?.userId, '9');
     assert.deepEqual(r.candidates.filter((c) => c.platform === 'tiktok').map((c) => c.userId), ['8']);
   });
@@ -283,51 +288,37 @@ describe('matching', () => {
       'GET tiktok/users?query=amy': { users: [{ userId: '8', username: 'amy' }] },
       'GET tiktok/profile/8/report': report('8', { username: 'amy' }, []),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok, undefined);
     assert.deepEqual(r.candidates.filter((c) => c.platform === 'tiktok').map((c) => c.userId).sort(), ['8', '9']);
   });
 
   it('does not accept an email that another account on the starting platform also lists', async () => {
-    const saved = {
-      ...amy,
-      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
-      'POST email-search {"emails":["team@example.com"]}': {
-        matchedEmails: [
-          {
-            email: 'team@example.com',
-            users: [
-              { platform: 'instagram', userId: '1', username: 'amy' },
-              { platform: 'instagram', userId: '2', username: 'bea' },
-              { platform: 'youtube', userId: 'UCbea', username: 'bea' },
-            ],
-          },
-        ],
-      },
-    };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const reads = memoryReads({
+      accounts: [amyAccount],
+      reports: [amyReport([{ type: 'email', value: 'team@example.com' }])],
+      listings: [
+        { email: 'team@example.com', platform: 'instagram', userId: '1' },
+        { email: 'team@example.com', platform: 'instagram', userId: '2' },
+        { email: 'team@example.com', platform: 'youtube', userId: 'UCbea' },
+      ],
+    });
+    const r = await new Matcher(reads).match('instagram', 'amy');
     assert.equal(r.accounts.youtube, undefined);
     assert.equal(r.accounts.instagram?.email_agrees, undefined);
     assert.deepEqual(r.candidates.map((c) => c.userId), ['UCbea']);
   });
 
   it('treats an email as shared when the search names another account on the starting platform', async () => {
-    const saved = {
-      ...amy,
-      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
-      'POST email-search {"emails":["team@example.com"]}': {
-        matchedEmails: [
-          {
-            email: 'team@example.com',
-            users: [
-              { platform: 'instagram', userId: '2', username: 'bea' },
-              { platform: 'youtube', userId: 'UCbea', username: 'bea' },
-            ],
-          },
-        ],
-      },
-    };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const reads = memoryReads({
+      accounts: [amyAccount],
+      reports: [amyReport([{ type: 'email', value: 'team@example.com' }])],
+      listings: [
+        { email: 'team@example.com', platform: 'instagram', userId: '2' },
+        { email: 'team@example.com', platform: 'youtube', userId: 'UCbea' },
+      ],
+    });
+    const r = await new Matcher(reads).match('instagram', 'amy');
     assert.equal(r.accounts.youtube, undefined);
     assert.deepEqual(r.candidates.map((c) => c.userId), ['UCbea']);
   });
@@ -350,7 +341,7 @@ describe('matching', () => {
         { type: 'instagram', value: 'https://www.instagram.com/amy' },
       ]),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.instagram?.email_agrees, true);
     assert.equal(r.accounts.tiktok?.email_agrees, true);
     assert.equal(r.accounts.youtube?.email_agrees, undefined);
@@ -379,27 +370,22 @@ describe('matching', () => {
         ],
       },
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.youtube?.userId, uc);
     assert.equal(r.accounts.tiktok, undefined);
     assert.deepEqual(r.candidates.map((c) => c.userId), ['77']);
   });
 
   it('lists both accounts when two emails name different accounts on one platform', async () => {
-    const saved = {
-      ...amy,
-      'GET instagram/profile/1/report': report('1', { username: 'amy' }, [
-        { type: 'email', value: 'a@example.com' },
-        { type: 'email', value: 'b@example.com' },
-      ]),
-      'POST email-search {"emails":["a@example.com","b@example.com"]}': {
-        matchedEmails: [
-          { email: 'a@example.com', users: [{ platform: 'tiktok', userId: '8', username: 'cat' }] },
-          { email: 'b@example.com', users: [{ platform: 'tiktok', userId: '9', username: 'dan' }] },
-        ],
-      },
-    };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const reads = memoryReads({
+      accounts: [amyAccount],
+      reports: [amyReport([{ type: 'email', value: 'a@example.com' }, { type: 'email', value: 'b@example.com' }])],
+      listings: [
+        { email: 'a@example.com', platform: 'tiktok', userId: '8' },
+        { email: 'b@example.com', platform: 'tiktok', userId: '9' },
+      ],
+    });
+    const r = await new Matcher(reads).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok, undefined);
     assert.deepEqual(r.candidates.map((c) => c.userId).sort(), ['8', '9']);
   });
@@ -413,12 +399,12 @@ describe('matching', () => {
         { type: 'instagram', value: 'https://www.instagram.com/amy' },
       ]),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok?.followers, 250000);
   });
 
   it('records a creator who is not found without an error', async () => {
-    const r = await new Matcher(client(fake({ 'GET instagram/users?query=amy': { users: [] } }))).match('instagram', 'amy');
+    const r = await new Matcher(memoryReads({})).match('instagram', 'amy');
     assert.deepEqual(r.errors, []);
     assert.deepEqual(r.missing, ['instagram', 'tiktok', 'youtube']);
   });
@@ -432,7 +418,7 @@ describe('matching', () => {
       'GET tiktok/users?query=amy': { users: [{ userId: '9', username: 'amy' }] },
       'GET tiktok/profile/9/report': report('9', { username: 'amy' }, [{ type: 'instagram', value: 'instagram.com/amy' }]),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok?.userId, '9');
     assert.equal(r.accounts.tiktok?.how, 'same handle, confirmed by its profile link back');
     assert.deepEqual(r.candidates, [{ platform: 'tiktok', userId: '8', username: 'partner', followers: null, how: 'profile link, one way' }]);
@@ -450,7 +436,7 @@ describe('matching', () => {
       },
     };
     const c = client(fake(saved));
-    const r = await new Matcher(c).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(c)).match('instagram', 'amy');
     assert.equal(r.accounts.youtube, undefined);
     assert.deepEqual(r.missing, ['tiktok', 'youtube']);
     assert.equal(c.spent, 2);
@@ -470,7 +456,7 @@ describe('matching', () => {
         matchedEmails: [{ email: 'amy@example.com', users: [{ platform: 'youtube', userId: 'UCamy', username: 'amy' }] }],
       },
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.youtube?.how, 'email (amy@example.com)');
   });
 
@@ -490,7 +476,7 @@ describe('matching', () => {
         matchedEmails: [{ email: 'pr@brand.example', users: [{ platform: 'youtube', userId: 'UCbrand', username: 'brand' }] }],
       },
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok?.userId, '8');
     assert.equal(r.accounts.youtube, undefined);
   });
@@ -513,7 +499,7 @@ describe('matching', () => {
       'GET tiktok/users?query=amy': { users: [{ userId: '8', username: 'amy' }] },
       'GET tiktok/profile/8/report': report('8', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok, undefined);
   });
 
@@ -533,7 +519,7 @@ describe('matching', () => {
       'GET tiktok/users?query=amy': { users: [{ userId: '9', username: 'amy' }] },
       'GET tiktok/profile/9/report': report('9', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok, undefined);
     assert.deepEqual(r.candidates.map((c) => c.userId).sort(), ['7', '8', '9']);
   });
@@ -549,7 +535,7 @@ describe('matching', () => {
         { type: 'instagram', value: 'https://www.instagram.com/amy' },
       ]),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok?.email_agrees, true);
     assert.equal(r.accounts.instagram?.email_agrees, true);
   });
@@ -577,7 +563,7 @@ describe('matching', () => {
         { type: 'instagram', value: 'https://www.instagram.com/amy' },
       ]),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.youtube?.userId, 'UC1');
     assert.equal(r.accounts.tiktok?.email_agrees, undefined);
     assert.equal(r.accounts.instagram?.email_agrees, undefined);
@@ -599,7 +585,7 @@ describe('matching', () => {
         ],
       },
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok?.followers, 250000);
   });
 
@@ -610,7 +596,7 @@ describe('matching', () => {
       'GET tiktok/users?query=amy': { users: [{ userId: '9', username: 'amy' }] },
       'GET tiktok/profile/9/report': report('9', { username: 'amy' }, [{ type: 'email', value: 'team@example.com' }]),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok, undefined);
     assert.deepEqual(r.candidates.map((c) => c.how), ['same handle, unconfirmed']);
     assert.ok(r.errors.some((e) => e.startsWith('email search')));
@@ -629,7 +615,7 @@ describe('matching', () => {
       'GET youtube/users?query=amy': { users: [{ userId: 'UC9', handle: '@amy' }] },
       'GET youtube/profile/UC9/report': report('UC9', { handle: '@amy' }, linksBack),
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.equal(r.accounts.tiktok?.email_agrees, true);
     assert.equal(r.accounts.youtube?.email_agrees, true);
     assert.equal(r.accounts.instagram?.email_agrees, undefined);
@@ -655,7 +641,7 @@ describe('matching', () => {
         ],
       },
     };
-    const r = await new Matcher(client(fake(saved))).match('instagram', 'amy');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('instagram', 'amy');
     assert.deepEqual(r.candidates.map((c) => `${c.userId} ${c.how}`), [
       '8 profile link, one way',
       '9 email (team@example.com), shared by several accounts',
@@ -671,7 +657,7 @@ describe('matching', () => {
         ],
       },
     });
-    assert.equal((await new Matcher(client(t)).lookup('youtube', 'amy'))?.userId, 'UC2');
+    assert.equal((await modashReads(client(t)).findAccount('youtube', 'amy'))?.userId, 'UC2');
   });
 
   it('tries every name the start answers to when looking for the same handle', async () => {
@@ -684,7 +670,7 @@ describe('matching', () => {
         { type: 'youtube', value: 'https://www.youtube.com/@newname' },
       ]),
     };
-    const r = await new Matcher(client(fake(saved))).match('youtube', 'oldname');
+    const r = await new Matcher(modashReads(client(fake(saved)))).match('youtube', 'oldname');
     assert.equal(r.accounts.instagram?.how, 'same handle, confirmed by its profile link back');
   });
 });
