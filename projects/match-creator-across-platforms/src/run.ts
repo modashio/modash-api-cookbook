@@ -2,15 +2,14 @@ import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { cleanInput, runBatch } from './batch.js';
 import { loadConfig } from './config.js';
-import { handleFrom, isPlatform, PLATFORMS, type Platform } from './contacts.js';
+import { PLATFORMS } from './contacts.js';
 import { type MatchResult, Matcher } from './match.js';
 import { liveTransport, ModashClient } from './modash/client.js';
-import { stopsTheRun } from './modash/errors.js';
 import { MOCK_HANDLES, mockTransport } from './modash/mock.js';
 import { modashReads } from './modash/reads.js';
 import { round2 } from './numbers.js';
-import { creatorKey, openResults, type ResultsMode } from './results.js';
 
 export interface RunOptions {
   argv: string[];
@@ -97,38 +96,19 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
     : new ModashClient(liveTransport(config.apiToken!), { budget });
   const matcher = new Matcher(modashReads(client, mock ? undefined : join(outDir, 'reports')));
 
-  const results = openResults(resultsFile, resultsMode(mock, values.csv !== undefined, todo));
-  const done = new Set(results.finished);
-
-  let ran = 0;
-  for (const [index, [rawPlatform, rawHandle]] of todo.entries()) {
-    let platform: Platform;
-    let handle: string;
-    try {
-      [platform, handle] = cleanInput(rawPlatform, rawHandle);
-    } catch (error) {
-      print(`row ${index + 1} skipped: ${(error as Error).message}`);
-      continue;
-    }
-    const key = creatorKey(platform, handle);
-    if (done.has(key)) continue;
-    done.add(key);
-
-    let result: MatchResult;
-    try {
-      result = await matcher.match(platform, handle);
-    } catch (error) {
-      if (stopsTheRun(error)) {
-        print(`Stopped at @${handle}: ${error.message}`);
-        print(`Credits this run: ${round2(client.spent)}`);
-        print(`Finished creators are in ${shown}. Run the same command again to carry on.`);
-        return 1;
-      }
-      throw error;
-    }
-    results.record(result);
-    print(`${summary(result, mock)}\n`);
-    ran += 1;
+  const { ran, stoppedAt } = await runBatch({
+    rows: todo,
+    matcher,
+    resultsPath: resultsFile,
+    kind: mock ? 'mock' : values.csv !== undefined ? 'csv' : 'single',
+    onResult: (result) => print(`${summary(result, mock)}\n`),
+    onSkip: (rowNumber, reason) => print(`row ${rowNumber} skipped: ${reason}`),
+  });
+  if (stoppedAt) {
+    print(`Stopped at @${stoppedAt.handle}: ${stoppedAt.error.message}`);
+    print(`Credits this run: ${round2(client.spent)}`);
+    print(`Finished creators are in ${shown}. Run the same command again to carry on.`);
+    return 1;
   }
 
   const total = round2(client.spent);
@@ -136,28 +116,6 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   else if (mock) print(`Results in ${shown}. This was mock mode, so nothing was spent; a live run of the same creators costs ${total} credits.`);
   else print(`Results in ${shown}. Credits this run: ${total}`);
   return 0;
-}
-
-function resultsMode(mock: boolean, csv: boolean, todo: [string, string][]): ResultsMode {
-  if (mock) return { kind: 'fresh' };
-  if (csv) return { kind: 'resume', toRun: new Set(todo.flatMap(([p, h]) => creatorKeyOf(p, h) ?? [])) };
-  return { kind: 'replace' };
-}
-
-function creatorKeyOf(platform: string | undefined, handle: string | undefined): string | undefined {
-  try {
-    return creatorKey(...cleanInput(platform, handle));
-  } catch {
-    return undefined;
-  }
-}
-
-export function cleanInput(platform: string | undefined, handle: string | undefined): [Platform, string] {
-  const p = (platform ?? '').trim().toLowerCase();
-  if (!isPlatform(p)) throw new Error(`platform must be one of ${PLATFORMS.join(', ')}, got "${platform ?? ''}"`);
-  const h = handleFrom(p, (handle ?? '').trim());
-  if (!h) throw new Error(`could not read a ${p} handle from "${handle ?? ''}"`);
-  return [p, h];
 }
 
 export function summary(result: MatchResult, mock = false): string {

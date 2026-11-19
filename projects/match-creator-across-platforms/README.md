@@ -319,11 +319,15 @@ Follower counts come from the report when the tool has one.
 | Path | What it is |
 | --- | --- |
 | `src/match.ts` | The method: the five steps above, in `Matcher` |
-| `src/email-evidence.ts` | What the emails prove: which are shared, which confirm an account, which agree |
+| `src/creator-match.ts` | What the run knows about one creator: matches, candidates, reports held, and what the emails prove |
 | `src/contacts.ts` | Reading handles and ids out of profile links |
+| `src/modash/reads.ts` | The three Modash calls the method makes, with their costs, and the saved reports |
 | `src/modash/` | The HTTP layer: client with budget and retries, response schemas, errors, mock transport |
 | `src/run.ts`, `src/cli.ts` | The command line: arguments, CSV, output |
+| `src/batch.ts` | A run over many creators: skips finished ones, records each result, stops on a bad token, empty balance or spent budget |
 | `src/results.ts` | The results file: which creators are finished, resume, one line per creator |
+| `src/config.ts` | The environment variables: token, mock mode, credit budget |
+| `src/numbers.ts` | Rounding credits to two decimals |
 | `fixtures/demo-responses.json` | What mock mode answers from: invented creators, the API's real response shape |
 | `sample-output/` | The two records mock mode produces |
 | `handles.example.csv` | The CSV format for a batch run |
