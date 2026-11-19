@@ -1,32 +1,14 @@
-import { groupBy, partition, uniqBy } from 'lodash-es';
+import { partition } from 'lodash-es';
 
-import { CreatorMatch } from './creator-match.js';
+import { type Account, CreatorMatch, type MatchResult } from './creator-match.js';
 import { emailsIn, handleFrom, idFrom, nameOf, namesOf, PLATFORMS, type Platform } from './contacts.js';
+import { type EmailEvidence, searchEmailEvidence } from './email-evidence.js';
 import { stopsTheRun } from './modash/errors.js';
 import type { ModashReads } from './modash/reads.js';
 import type { ReportProfile } from './modash/responses.js';
 import { round2 } from './numbers.js';
 
-export interface Account {
-  userId: string;
-  username: string | null;
-  followers: number | null;
-  how: string;
-  email_agrees?: true;
-}
-
-export interface Candidate extends Account {
-  platform: Platform;
-}
-
-export interface MatchResult {
-  input: { platform: Platform; handle: string };
-  accounts: Partial<Record<Platform, Account>>;
-  candidates: Candidate[];
-  missing: Platform[];
-  credits: number;
-  errors: string[];
-}
+export type { MatchResult } from './creator-match.js';
 
 /** The account the run started from, and what its report says about it. */
 interface Start {
@@ -67,19 +49,20 @@ export class Matcher {
   async match(platform: Platform, handle: string): Promise<MatchResult> {
     const spentBefore = this.reads.spent;
     const creator = new CreatorMatch(platform, handle);
+    let emailAgrees: Platform[] = [];
     try {
       const start = await this.#readStart(platform, handle, creator);
       if (start) {
-        await this.#followProfileLinks(start, creator);
-        await this.#matchByEmail(creator);
-        await this.#trySameHandle(start, creator);
-        creator.markEmailAgreement();
+        const confirmed = await this.#followProfileLinks(start, creator);
+        const evidence = await this.#matchByEmail(creator, [start.report, ...confirmed]);
+        await this.#trySameHandle(start, creator, evidence);
+        emailAgrees = evidence.agreeing(creator.matched, (p, userId) => creator.heldReport(p, userId));
       }
     } catch (error) {
       if (stopsTheRun(error)) throw error;
       creator.fail(describe(error));
     }
-    return creator.result(round2(this.reads.spent - spentBefore));
+    return creator.result(round2(this.reads.spent - spentBefore), emailAgrees);
   }
 
   /** Step 1: turn the handle into an id, then pull that account's report. */
@@ -90,7 +73,6 @@ export class Matcher {
     const followers = report?.profile?.followers ?? me.followers ?? null;
     creator.accept({ platform, userId: me.userId, username: nameOf(me), followers, how: 'input' });
     if (!report) return undefined;
-    creator.claim(emailsIn(report));
     return {
       platform,
       userId: me.userId,
@@ -100,7 +82,8 @@ export class Matcher {
   }
 
   /** Steps 2 and 3: a linked account is a match only when its own report links back to the start. */
-  async #followProfileLinks(start: Start, creator: CreatorMatch): Promise<void> {
+  async #followProfileLinks(start: Start, creator: CreatorMatch): Promise<ReportProfile[]> {
+    const confirmed: ReportProfile[] = [];
     for (const other of PLATFORMS) {
       if (other === start.platform) continue;
       const linked: { account: Account; report: ReportProfile }[] = [];
@@ -117,7 +100,7 @@ export class Matcher {
       );
       if (match) {
         creator.accept({ platform: other, ...match.account, how: 'confirmed both ways' });
-        creator.claim(emailsIn(match.report));
+        confirmed.push(match.report);
       }
       for (const { account } of alsoConfirmed) {
         creator.suggest({ platform: other, ...account, how: 'confirmed both ways, second link' });
@@ -126,6 +109,7 @@ export class Matcher {
         creator.suggest({ platform: other, ...account, how: 'profile link, one way' });
       }
     }
+    return confirmed;
   }
 
   async #linkedIds(start: Start, other: Platform, creator: CreatorMatch): Promise<string[]> {
@@ -147,37 +131,24 @@ export class Matcher {
   }
 
   /** Step 4: one account per platform across the emails is a match; a shared address or a conflict gives candidates. */
-  async #matchByEmail(creator: CreatorMatch): Promise<void> {
-    const missing = creator.missing();
-    const claimed = creator.claimed;
-    if (missing.length === 0 || claimed.length === 0) return;
-    const rows = await this.#safe(creator, 'email search', () => this.reads.searchEmails(claimed));
-    creator.recordSearch(rows);
-    const sharedEmails = creator.sharedEmails();
-    const [sharedRows, ownRows] = partition(rows ?? [], (row) => sharedEmails.has(row.email));
-    const byPlatform = groupBy(
-      ownRows.filter((row) => missing.includes(row.platform)),
-      'platform',
+  async #matchByEmail(creator: CreatorMatch, claimedOn: ReportProfile[]): Promise<EmailEvidence> {
+    const claimed = claimedOn.flatMap((report) => [...emailsIn(report)]);
+    const evidence = await searchEmailEvidence(claimed, creator.matched, (emails) =>
+      this.#safe(creator, 'email search', () => this.reads.searchEmails(emails)),
     );
-    for (const group of Object.values(byPlatform)) {
-      const [first] = group;
-      if (first && uniqBy(group, 'userId').length === 1) {
-        const { email, ...row } = first;
-        const report = creator.heldReport(row.platform, row.userId);
-        creator.accept({ ...row, followers: report?.profile?.followers ?? row.followers, how: `email (${email})` });
+    for (const { accept, candidate } of evidence.verdicts) {
+      if (!accept) {
+        creator.suggest(candidate);
         continue;
       }
-      for (const { email, ...row } of group) {
-        creator.suggest({ ...row, how: `email (${email}), another email names a different account` });
-      }
+      const report = creator.heldReport(candidate.platform, candidate.userId);
+      creator.accept({ ...candidate, followers: report?.profile?.followers ?? candidate.followers });
     }
-    for (const { email, ...row } of sharedRows.filter((r) => !creator.account(r.platform))) {
-      creator.suggest({ ...row, how: `email (${email}), shared by several accounts` });
-    }
+    return evidence;
   }
 
   /** Step 5: an account with one of the start's names is a guess until its own report confirms it. */
-  async #trySameHandle(start: Start, creator: CreatorMatch): Promise<void> {
+  async #trySameHandle(start: Start, creator: CreatorMatch, evidence: EmailEvidence): Promise<void> {
     for (const other of creator.missing()) {
       for (const name of start.names) {
         if (creator.account(other)) break;
@@ -186,7 +157,7 @@ export class Matcher {
         const back = await this.#tryReport(creator, other, row.userId);
         const followers = back?.profile?.followers ?? row.followers ?? null;
         const base = { platform: other, userId: row.userId, username: nameOf(row), followers };
-        const shared = back ? creator.confirming(other, row.userId, emailsIn(back)) : [];
+        const shared = back ? evidence.confirming(creator.matched, other, row.userId, emailsIn(back)) : [];
         if (back && Matcher.pointsBack(back, start.platform, start.names, start.userId)) {
           creator.accept({ ...base, how: 'same handle, confirmed by its profile link back' });
         } else if (shared.length > 0) {
