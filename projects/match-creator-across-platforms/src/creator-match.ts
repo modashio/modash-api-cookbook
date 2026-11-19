@@ -24,6 +24,11 @@ export interface MatchResult {
   errors: string[];
 }
 
+/** The part of the email evidence the result reads: the platforms whose matched accounts agree by email. */
+interface EmailAgreement {
+  agreeing(): Platform[];
+}
+
 /** Everything the run knows about one creator: the accounts matched so far, the candidates, and the reports held. */
 export class CreatorMatch {
   readonly #input: MatchResult['input'];
@@ -32,6 +37,7 @@ export class CreatorMatch {
   readonly #errors: string[] = [];
   /** Reports asked for while matching this creator (null when the call failed), so none is paid for twice. */
   readonly #reports = new Map<string, ReportProfile | null>();
+  #emailEvidence: EmailAgreement | undefined;
 
   constructor(platform: Platform, handle: string) {
     this.#input = { platform, handle };
@@ -82,8 +88,13 @@ export class CreatorMatch {
     return this.#reports.get(`${platform}:${userId}`) ?? undefined;
   }
 
-  result(credits: number, emailAgrees: Platform[] = []): MatchResult {
-    for (const platform of emailAgrees) this.#accounts[platform]!.email_agrees = true;
+  /** The email evidence searched for this creator; the result marks the matched accounts it says agree. */
+  useEmailEvidence(evidence: EmailAgreement): void {
+    this.#emailEvidence = evidence;
+  }
+
+  result(credits: number): MatchResult {
+    for (const platform of this.#emailEvidence?.agreeing() ?? []) this.#accounts[platform]!.email_agrees = true;
     return {
       input: this.#input,
       accounts: this.#accounts,

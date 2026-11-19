@@ -13,10 +13,16 @@ const hit = (email: string, platform: Platform, userId: string): EmailSearchHit 
   followers: null,
 });
 
-const evidence = (claimed: string[], matched: Matched, hits: EmailSearchHit[] | undefined) =>
-  searchEmailEvidence(claimed, matched, async () => hits);
-
 const report = (emails: string[]): ReportProfile => ({ contacts: emails.map((value) => ({ type: 'email', value })) });
+
+/** A creator whose matches a test can change between questions, with the reports it holds by `platform:userId`. */
+const creatorWith = (matched: Matched, reports: Record<string, ReportProfile> = {}) => ({
+  matched,
+  heldReport: (platform: Platform, userId: string) => reports[`${platform}:${userId}`],
+});
+
+const evidence = (claimed: string[], matched: Matched, hits: EmailSearchHit[] | undefined) =>
+  searchEmailEvidence(creatorWith(matched), claimed, async () => hits);
 
 describe('email evidence', () => {
   it('calls an email shared when two accounts on one platform list it', async () => {
@@ -54,29 +60,37 @@ describe('email evidence', () => {
       hit('me@example.com', 'tiktok', '9'),
     ]);
     const listed = ['me@example.com', 'team@example.com', 'other@example.com'];
-    assert.deepEqual(confirming({}, 'tiktok', '9', listed), ['me@example.com']);
+    assert.deepEqual(confirming('tiktok', '9', listed), ['me@example.com']);
   });
 
   it('does not confirm a candidate by an email another account lists on a matched platform', async () => {
-    const { confirming } = await evidence(['team@example.com'], {}, [hit('team@example.com', 'instagram', '2')]);
-    assert.deepEqual(confirming({}, 'tiktok', '9', ['team@example.com']), ['team@example.com']);
-    assert.deepEqual(confirming({ instagram: { userId: '1' } }, 'tiktok', '9', ['team@example.com']), []);
+    const creator = creatorWith({});
+    const { confirming } = await searchEmailEvidence(creator, ['team@example.com'], async () => [
+      hit('team@example.com', 'instagram', '2'),
+    ]);
+    assert.deepEqual(confirming('tiktok', '9', ['team@example.com']), ['team@example.com']);
+    creator.matched = { instagram: { userId: '1' } };
+    assert.deepEqual(confirming('tiktok', '9', ['team@example.com']), []);
   });
 
   it('confirms nothing by email when email search failed', async () => {
     const { confirming } = await evidence(['me@example.com'], {}, undefined);
-    assert.deepEqual(confirming({}, 'tiktok', '9', ['me@example.com']), []);
+    assert.deepEqual(confirming('tiktok', '9', ['me@example.com']), []);
   });
 
   it('finds agreement only on an unshared email listed on two platforms', async () => {
-    const { agreeing } = await evidence(['team@example.com'], {}, [hit('team@example.com', 'youtube', 'UC2')]);
-    const reports: Record<string, ReportProfile> = {
-      'instagram:1': report(['a@example.com', 'team@example.com']),
-      'tiktok:8': report(['a@example.com']),
-      'youtube:UC1': report(['team@example.com']),
-    };
-    const matched = { instagram: { userId: '1' }, tiktok: { userId: '8' }, youtube: { userId: 'UC1' } };
-    const agreeingPlatforms = agreeing(matched, (platform, userId) => reports[`${platform}:${userId}`]);
-    assert.deepEqual(agreeingPlatforms.sort(), ['instagram', 'tiktok']);
+    const creator = creatorWith(
+      {},
+      {
+        'instagram:1': report(['a@example.com', 'team@example.com']),
+        'tiktok:8': report(['a@example.com']),
+        'youtube:UC1': report(['team@example.com']),
+      },
+    );
+    const { agreeing } = await searchEmailEvidence(creator, ['team@example.com'], async () => [
+      hit('team@example.com', 'youtube', 'UC2'),
+    ]);
+    creator.matched = { instagram: { userId: '1' }, tiktok: { userId: '8' }, youtube: { userId: 'UC1' } };
+    assert.deepEqual(agreeing().sort(), ['instagram', 'tiktok']);
   });
 });

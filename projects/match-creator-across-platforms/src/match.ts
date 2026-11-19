@@ -47,20 +47,18 @@ export class Matcher {
   async match(platform: Platform, handle: string): Promise<MatchResult> {
     const spentBefore = this.reads.spent;
     const creator = new CreatorMatch(platform, handle);
-    let emailAgrees: Platform[] = [];
     try {
       const start = await this.#readStart(platform, handle, creator);
       if (start) {
         const confirmed = await this.#followProfileLinks(start, creator);
         const evidence = await this.#matchByEmail(creator, [start.report, ...confirmed]);
         await this.#trySameHandle(start, creator, evidence);
-        emailAgrees = evidence.agreeing(creator.matched, (p, userId) => creator.heldReport(p, userId));
       }
     } catch (error) {
       if (stopsTheRun(error)) throw error;
       creator.fail(describe(error));
     }
-    return creator.result(round2(this.reads.spent - spentBefore), emailAgrees);
+    return creator.result(round2(this.reads.spent - spentBefore));
   }
 
   /** Step 1: turn the handle into an id, then pull that account's report. */
@@ -129,16 +127,13 @@ export class Matcher {
   /** Step 4: one account per platform across the emails is a match; a shared address or a conflict gives candidates. */
   async #matchByEmail(creator: CreatorMatch, claimedOn: ReportProfile[]): Promise<EmailEvidence> {
     const claimed = claimedOn.flatMap((report) => [...emailsIn(report)]);
-    const evidence = await searchEmailEvidence(claimed, creator.matched, (emails) =>
+    const evidence = await searchEmailEvidence(creator, claimed, (emails) =>
       this.#safe(creator, 'email search', async () => emailSearchHits(await this.reads.searchEmails(emails))),
     );
+    creator.useEmailEvidence(evidence);
     for (const { accept, candidate } of evidence.verdicts) {
-      if (!accept) {
-        creator.suggest(candidate);
-        continue;
-      }
-      const report = creator.heldReport(candidate.platform, candidate.userId);
-      creator.accept({ ...candidate, followers: report?.profile?.followers ?? candidate.followers });
+      if (accept) creator.accept(candidate);
+      else creator.suggest(candidate);
     }
     return evidence;
   }
@@ -153,7 +148,7 @@ export class Matcher {
         const back = await this.#tryReport(creator, other, row.userId);
         const followers = back?.profile?.followers ?? row.followers ?? null;
         const base = { platform: other, userId: row.userId, username: nameOf(row), followers };
-        const shared = back ? evidence.confirming(creator.matched, other, row.userId, emailsIn(back)) : [];
+        const shared = back ? evidence.confirming(other, row.userId, emailsIn(back)) : [];
         if (back && Matcher.pointsBack(back, start.platform, start.names, start.userId)) {
           creator.accept({ ...base, how: 'same handle, confirmed by its profile link back' });
         } else if (shared.length > 0) {
