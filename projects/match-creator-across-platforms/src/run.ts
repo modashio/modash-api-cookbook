@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { type CreatorRow, parseRows, runBatch } from './batch.js';
+import { type Creator, parseCreator, runBatch } from './batch.js';
 import { type Config, creditBudgetSchema, loadConfig } from './config.js';
 import { PLATFORMS } from './contacts.js';
 import type { MatchResult } from './creator-match.js';
@@ -36,7 +36,7 @@ export class UsageError extends Error {}
 
 interface Input {
   csv: boolean;
-  rows: CreatorRow[];
+  creators: Creator[];
   mock: boolean;
   budget: number;
   apiToken: string | undefined;
@@ -48,13 +48,13 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
     print(USAGE);
     return 0;
   }
-  const { csv, rows: todo, mock, budget, apiToken } = input;
+  const { csv, creators, mock, budget, apiToken } = input;
 
   // Mock mode starts the file over, a CSV resumes it, and a single handle replaces its own line.
   const mode: ResultsMode = mock
     ? { kind: 'fresh' }
     : csv
-      ? { kind: 'resume', toRun: new Set(todo.flatMap((r) => (r.kind === 'creator' ? creatorKey(r.platform, r.handle) : []))) }
+      ? { kind: 'resume', toRun: new Set(creators.map((c) => creatorKey(c.platform, c.handle))) }
       : { kind: 'replace' };
 
   const outDir = join(cwd, 'output');
@@ -66,12 +66,11 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   const matcher = new Matcher(modashReads(client, mock ? undefined : join(outDir, 'reports')));
 
   const { ran, stoppedAt } = await runBatch({
-    rows: todo,
+    creators,
     matcher,
     resultsPath: resultsFile,
     mode,
     onResult: (result) => print(`${summary(result, mock)}\n`),
-    onSkip: (rowNumber, reason) => print(`row ${rowNumber} skipped: ${reason}`),
   });
   if (stoppedAt) {
     print(`Stopped at @${stoppedAt.handle}: ${stoppedAt.error.message}`);
@@ -116,23 +115,18 @@ function parseInput(argv: string[], env: NodeJS.ProcessEnv): Input | 'help' {
   const problems: string[] = [];
   let showUsage = false;
 
-  let rows: CreatorRow[] = [];
+  let creators: Creator[] = [];
   if (args.length !== (csv ? 1 : 2)) {
     const expected = csv ? 'a file' : 'a platform and a handle';
     problems.push(`${command} takes ${expected}, got ${args.length === 0 ? 'nothing' : args.map((a) => `"${a}"`).join(' ')}.`);
     showUsage = true;
-  } else if (csv) {
+  } else {
     try {
-      rows = parseRows(readCsv(args[0]!));
+      creators = csv ? creatorsFromCsv(args[0]!, mock) : [checkCreator(args[0]!, args[1]!, mock)];
     } catch (error) {
       problems.push((error as Error).message);
     }
-  } else {
-    rows = parseRows([[args[0]!, args[1]!]]);
   }
-  if (mock) rows = rows.map(onlyMockCreators);
-  // A CSV skips its bad rows, but the one creator of match-creator must be valid.
-  if (!csv && rows[0]?.kind === 'skipped') problems.push(rows[0].reason);
 
   let config: Config | undefined;
   try {
@@ -156,16 +150,34 @@ function parseInput(argv: string[], env: NodeJS.ProcessEnv): Input | 'help' {
     const message = problems.length === 1 ? problems[0]! : `The run did not start:\n${problems.map((p) => `  - ${p}`).join('\n')}`;
     throw new UsageError(showUsage ? `${message}\n\n${USAGE}` : message);
   }
-  return { csv, rows, mock, budget, apiToken: config!.apiToken };
+  return { csv, creators, mock, budget, apiToken: config!.apiToken };
 }
 
-// Mock mode answers only for the invented creators, so any other row is skipped instead of failing with a 404.
-function onlyMockCreators(row: CreatorRow, index: number): CreatorRow {
-  if (row.kind === 'skipped') return row;
-  const known = row.platform === 'instagram' && (MOCK_HANDLES as readonly string[]).includes(row.handle.toLowerCase());
-  return known
-    ? row
-    : { kind: 'skipped', rowNumber: index + 1, reason: `mock mode knows only instagram ${MOCK_HANDLES.join(' and ')}, got ${row.platform} ${row.handle}` };
+const BAD_ROWS_SHOWN = 20;
+
+// A bad row blocks the whole run, so the user fixes the file once, before anything is spent.
+function creatorsFromCsv(path: string, mock: boolean): Creator[] {
+  const creators: Creator[] = [];
+  const bad: string[] = [];
+  for (const row of readCsv(path)) {
+    try {
+      creators.push(checkCreator(row.platform, row.handle, mock));
+    } catch (error) {
+      bad.push(`line ${row.line} (${JSON.stringify(row.platform)},${JSON.stringify(row.handle)}): ${(error as Error).message}`);
+    }
+  }
+  if (bad.length === 0) return creators;
+  const listed = bad.slice(0, BAD_ROWS_SHOWN).map((b) => `    - ${b}`);
+  if (bad.length > BAD_ROWS_SHOWN) listed.push(`    - and ${bad.length - BAD_ROWS_SHOWN} more`);
+  const rows = bad.length === 1 ? '1 row' : `${bad.length} rows`;
+  throw new Error(`${path} has ${rows} the tool cannot read:\n${listed.join('\n')}\n    Fix or remove these lines, then run the same command again.`);
+}
+
+function checkCreator(platform: string, handle: string, mock: boolean): Creator {
+  const creator = parseCreator(platform, handle);
+  const inMockData = creator.platform === 'instagram' && (MOCK_HANDLES as readonly string[]).includes(creator.handle);
+  if (mock && !inMockData) throw new Error(`Mock mode has data only for instagram ${MOCK_HANDLES.join(' and ')}.`);
+  return creator;
 }
 
 export function summary(result: MatchResult, mock = false): string {
@@ -186,58 +198,78 @@ export function summary(result: MatchResult, mock = false): string {
   return lines.join('\n');
 }
 
-export function readCsv(path: string): [string, string][] {
+export interface CsvRow {
+  /** The file line where the row starts. The header is line 1. */
+  line: number;
+  platform: string;
+  handle: string;
+}
+
+export function readCsv(path: string): CsvRow[] {
   let text: string;
   try {
-    text = readFileSync(path, 'utf8').replace(/^﻿/, '');
+    text = readFileSync(path, 'utf8').replace(/^\uFEFF/, '');
   } catch (error) {
-    throw new UsageError(`could not read ${path}: ${(error as Error).message}`);
+    throw new Error(`could not read ${path}: ${(error as Error).message}`);
   }
-  let parsed: string[][];
+  let records: CsvRecord[];
   try {
-    parsed = parseCsv(text);
+    records = parseCsv(text);
   } catch (error) {
-    throw new UsageError(`${path}: ${(error as Error).message}`);
+    throw new Error(`${path}: ${(error as Error).message}`);
   }
-  const [header, ...rows] = parsed;
-  const columns = (header ?? []).map((c) => c.trim().toLowerCase());
+  const [header, ...rows] = records;
+  const columns = (header?.cells ?? []).map((c) => c.trim().toLowerCase());
   const pi = columns.indexOf('platform');
   const hi = columns.indexOf('handle');
-  if (pi < 0 || hi < 0) throw new UsageError(`${path} needs the columns platform and handle`);
-  const out = rows.filter((r) => r.some((c) => c.trim() !== '')).map((r): [string, string] => [r[pi] ?? '', r[hi] ?? '']);
-  if (out.length === 0) throw new UsageError(`${path} has no rows`);
+  if (pi < 0 || hi < 0) throw new Error(`${path} needs the columns platform and handle`);
+  const out = rows
+    .filter((r) => r.cells.some((c) => c.trim() !== ''))
+    .map((r) => ({ line: r.line, platform: r.cells[pi] ?? '', handle: r.cells[hi] ?? '' }));
+  if (out.length === 0) throw new Error(`${path} has no rows`);
   return out;
 }
 
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
+export interface CsvRecord {
+  line: number;
+  cells: string[];
+}
+
+export function parseCsv(text: string): CsvRecord[] {
+  const records: CsvRecord[] = [];
+  let cells: string[] = [];
   let field = '';
   let quoted = false;
+  let line = 1;
+  let start = 1;
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i]!;
+    const lineBreak = ch === '\n' || (ch === '\r' && text[i + 1] !== '\n');
     if (quoted) {
       if (ch === '"' && text[i + 1] === '"') {
         field += '"';
         i += 1;
       } else if (ch === '"') quoted = false;
       else field += ch;
+      if (lineBreak) line += 1;
     } else if (ch === '"' && field === '') quoted = true;
     else if (ch === ',') {
-      row.push(field);
+      cells.push(field);
       field = '';
     } else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && text[i + 1] === '\n') i += 1;
-      row.push(field);
-      rows.push(row);
-      row = [];
+      cells.push(field);
+      records.push({ line: start, cells });
+      cells = [];
       field = '';
+      line += 1;
+      start = line;
     } else field += ch;
   }
   if (quoted) throw new Error('a quoted field never closes');
-  if (field !== '' || row.length > 0) {
-    row.push(field);
-    rows.push(row);
+  if (field !== '' || cells.length > 0) {
+    cells.push(field);
+    records.push({ line: start, cells });
   }
-  return rows;
+  return records;
 }

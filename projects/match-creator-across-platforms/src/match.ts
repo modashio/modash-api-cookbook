@@ -23,7 +23,7 @@ export class Matcher {
     return (report.contacts ?? []).some(
       (c) =>
         c.type === platform &&
-        (startNames.has((handleFrom(platform, c.value) ?? '').toLowerCase()) || idFrom(platform, c.value) === startId),
+        (startNames.has(handleFrom(platform, c.value) ?? '') || idFrom(platform, c.value) === startId),
     );
   }
 
@@ -54,7 +54,7 @@ export class Matcher {
     return {
       platform,
       userId: me.userId,
-      names: new Set([handle.toLowerCase(), ...namesOf(me), ...namesOf(report.profile)]),
+      names: new Set([handle, ...namesOf(me), ...namesOf(report.profile)]),
       report,
     };
   }

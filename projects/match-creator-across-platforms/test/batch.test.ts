@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import { parseRows, runBatch } from '../src/batch.js';
+import { parseCreator, runBatch } from '../src/batch.js';
 import type { MatchResult } from '../src/creator-match.js';
 import { Matcher } from '../src/match.js';
 import { CreditBudgetExceededError } from '../src/modash/errors.js';
@@ -22,7 +22,7 @@ const recorded = (path: string) =>
       return `${result.input.handle} ${result.errors.length === 0 ? 'finished' : 'failed'}`;
     });
 
-const rows = (...handles: string[]) => parseRows(handles.map((handle) => ['instagram', handle]));
+const creators = (...handles: string[]) => handles.map((handle) => parseCreator('instagram', handle));
 const resume = (...handles: string[]) => ({ kind: 'resume' as const, toRun: new Set(handles.map((h) => `instagram:${h}`)) });
 
 describe('batch run', () => {
@@ -38,7 +38,7 @@ describe('batch run', () => {
     writeFileSync(resultsPath, [line('amy', []), line('bea', ['report failed'])].join('\n'));
     const matched: string[] = [];
     const outcome = await runBatch({
-      rows: rows('amy', 'bea'),
+      creators: creators('amy', 'bea'),
       matcher: new Matcher(memoryReads({})),
       resultsPath,
       mode: resume('amy', 'bea'),
@@ -59,25 +59,14 @@ describe('batch run', () => {
         return reads.lookupAccounts(platform, query);
       },
     });
-    const outcome = await runBatch({ rows: rows('amy', 'bea', 'cat'), matcher, resultsPath, mode: resume('amy', 'bea', 'cat') });
+    const outcome = await runBatch({ creators: creators('amy', 'bea', 'cat'), matcher, resultsPath, mode: resume('amy', 'bea', 'cat') });
     assert.deepEqual(outcome, { ran: 1, stoppedAt: { handle: 'bea', error: stop } });
     assert.deepEqual(recorded(resultsPath), ['amy finished']);
   });
 
-  it('reports a skipped row between the results, where the run reaches it', async () => {
-    const seen: string[] = [];
-    await runBatch({
-      rows: parseRows([
-        ['instagram', 'amy'],
-        ['facebook', 'x'],
-        ['instagram', 'bea'],
-      ]),
-      matcher: new Matcher(memoryReads({})),
-      resultsPath,
-      mode: { kind: 'fresh' },
-      onResult: (result) => seen.push(result.input.handle),
-      onSkip: (rowNumber) => seen.push(`row ${rowNumber}`),
-    });
-    assert.deepEqual(seen, ['amy', 'row 2', 'bea']);
+  it('reads a profile link and keeps the handle in lower case', () => {
+    assert.deepEqual(parseCreator(' Instagram ', 'https://www.instagram.com/Amy.Bakes/'), { platform: 'instagram', handle: 'amy.bakes' });
+    assert.throws(() => parseCreator('facebook', 'amy'), /"facebook" is not a platform\. Use instagram, tiktok, youtube\./);
+    assert.throws(() => parseCreator('instagram', 'https://x.com/amy'), /"https:\/\/x\.com\/amy" is not an instagram handle or profile link\./);
   });
 });

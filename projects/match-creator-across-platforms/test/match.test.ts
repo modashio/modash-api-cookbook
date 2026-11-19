@@ -58,7 +58,7 @@ describe('reading contacts', () => {
       ['instagram', 'john.doe', 'john.doe'],
       ['tiktok', 'https://www.tiktok.com/@u_1/video/123', 'u_1'],
       ['youtube', 'https://youtube.com/@bob/videos', 'bob'],
-      ['youtube', 'https://www.youtube.com/c/BobKitchen', 'BobKitchen'],
+      ['youtube', 'https://www.youtube.com/c/BobKitchen', 'bobkitchen'],
       ['youtube', 'youtube.com/user/bobold?x=1', 'bobold'],
     ];
     for (const [platform, value, want] of cases) assert.equal(handleFrom(platform, value), want, value);
@@ -717,7 +717,7 @@ describe('command line', () => {
 
   it('refuses a creator mock mode has no data for, with or without a token', async () => {
     for (const env of [{}, { MODASH_API_TOKEN: 'abc' }]) {
-      await assert.rejects(run({ argv: ['match-creator', '--mock', 'instagram', 'bob'], env, cwd: dir, print }), /mock mode knows only/);
+      await assert.rejects(run({ argv: ['match-creator', '--mock', 'instagram', 'bob'], env, cwd: dir, print }), /Mock mode has data only for instagram example_baker and example_techreviews/);
     }
   });
 
@@ -726,18 +726,40 @@ describe('command line', () => {
     assert.match(lines.join('\n'), /Stopped at @example_baker/);
   });
 
-  it('runs a CSV in mock mode and skips bad rows', async () => {
+  it('runs a CSV in mock mode and matches a creator listed twice once', async () => {
     const csv = join(dir, 'h.csv');
-    writeFileSync(csv, '﻿platform,handle\ninstagram,example_baker\nfacebook,x\n"instagram","https://www.instagram.com/example_baker/"\n');
+    writeFileSync(csv, '\uFEFFplatform,handle\ninstagram,Example_Baker\n"instagram","https://www.instagram.com/example_baker/"\n');
     assert.equal(await run({ argv: ['match-csv', '--mock', csv], env: {}, cwd: dir, print }), 0);
-    assert.match(lines.join('\n'), /row 2 skipped/);
     assert.equal(readFileSync(join(dir, 'output', 'mock-results.jsonl'), 'utf8').trim().split('\n').length, 1);
+  });
+
+  it('refuses a CSV with bad rows, names each file line, and runs nothing', async () => {
+    const csv = join(dir, 'h.csv');
+    writeFileSync(csv, 'platform,handle\ninstagram,example_baker\n\nfacebook,x\ninstagram,"https://x.com/\namy"\ntiktok,bob\n');
+    const error = await run({ argv: ['match-csv', '--mock', csv], env: {}, cwd: dir, print }).catch((e) => e);
+    assert.ok(error instanceof UsageError);
+    assert.match(error.message, /has 3 rows the tool cannot read/);
+    assert.match(error.message, /line 4 \("facebook","x"\): "facebook" is not a platform/);
+    assert.match(error.message, /line 5 \("instagram","https:\/\/x\.com\/\\namy"\): "https:\/\/x\.com\/\\namy" is not an instagram handle/);
+    assert.match(error.message, /line 7 \("tiktok","bob"\): Mock mode has data only for/);
+    assert.match(error.message, /Fix or remove these lines, then run the same command again\./);
+    assert.equal(existsSync(join(dir, 'output')), false);
+  });
+
+  it('lists at most 20 bad rows', async () => {
+    const csv = join(dir, 'h.csv');
+    writeFileSync(csv, `platform,handle\n${'facebook,x\n'.repeat(25)}`);
+    const error = await run({ argv: ['match-csv', '--mock', csv], env: {}, cwd: dir, print }).catch((e) => e);
+    assert.match(error.message, /has 25 rows/);
+    assert.match(error.message, /line 21 /);
+    assert.doesNotMatch(error.message, /line 22 /);
+    assert.match(error.message, /and 5 more/);
   });
 
   it('turns an unreadable single handle into a usage message', async () => {
     await assert.rejects(
       run({ argv: ['match-creator', '--mock', 'instagram', 'https://x.com/amy'], env: {}, print: () => {} }),
-      /could not read a instagram handle/,
+      /is not an instagram handle or profile link/,
     );
   });
 
@@ -745,7 +767,7 @@ describe('command line', () => {
     const error = await run({ argv: ['match-creator', 'facebook', 'bob', '--max-credits', 'Infinity'], env: {}, cwd: dir, print }).catch((e) => e);
     assert.ok(error instanceof UsageError);
     assert.match(error.message, /The run did not start/);
-    assert.match(error.message, /platform must be one of instagram, tiktok, youtube, got "facebook"/);
+    assert.match(error.message, /"facebook" is not a platform/);
     assert.match(error.message, /MODASH_API_TOKEN/);
     assert.match(error.message, /--max-credits must be a number above 0, got "Infinity"/);
     assert.equal(existsSync(join(dir, 'output')), false);
@@ -766,7 +788,7 @@ describe('command line', () => {
     const file = join(dir, 'results.jsonl');
     const line = (handle: string, errors: string[], credits: number) =>
       JSON.stringify({ input: { platform: 'instagram', handle }, accounts: {}, candidates: [], missing: [], credits, errors });
-    writeFileSync(file, [line('amy', [], 1), line('bea', ['report failed'], 0), line('Amy', [], 2), '{"cut off'].join('\n'));
+    writeFileSync(file, [line('amy', [], 1), line('bea', ['report failed'], 0), line('amy', [], 2), '{"cut off'].join('\n'));
     const results = openResults(file, { kind: 'resume', toRun: new Set(['instagram:amy', 'instagram:bea']) });
     assert.deepEqual([...results.finished], ['instagram:amy']);
     assert.equal(readFileSync(file, 'utf8'), `${line('amy', [], 1)}\n`);
@@ -783,8 +805,8 @@ describe('command line', () => {
       errors: [],
     });
     writeFileSync(file, `${JSON.stringify(result('amy', 1))}\n${JSON.stringify(result('bea', 1))}\n`);
-    openResults(file, { kind: 'replace' }).record(result('Amy', 2));
-    assert.equal(readFileSync(file, 'utf8'), `${JSON.stringify(result('bea', 1))}\n${JSON.stringify(result('Amy', 2))}\n`);
+    openResults(file, { kind: 'replace' }).record(result('amy', 2));
+    assert.equal(readFileSync(file, 'utf8'), `${JSON.stringify(result('bea', 1))}\n${JSON.stringify(result('amy', 2))}\n`);
   });
 
   it('keeps the failed result of a creator who is not in this run', () => {
@@ -799,11 +821,11 @@ describe('command line', () => {
 
   it('refuses a CSV with a quote that never closes', () => {
     assert.throws(() => parseCsv('platform,handle\ninstagram,"amy\ntiktok,bea\n'), /never closes/);
-    assert.deepEqual(parseCsv('a,b"c\n'), [['a', 'b"c']]);
+    assert.deepEqual(parseCsv('a,b"c\n').map((r) => r.cells), [['a', 'b"c']]);
   });
 
   it('parses quoted CSV fields', () => {
-    assert.deepEqual(parseCsv('a,b\r\n"x, y","say ""hi"""\n'), [
+    assert.deepEqual(parseCsv('a,b\r\n"x, y","say ""hi"""\n').map((r) => r.cells), [
       ['a', 'b'],
       ['x, y', 'say "hi"'],
     ]);

@@ -59,7 +59,8 @@ npm run match-csv -- handles.csv --max-credits 500
 | `MODASH_CREDIT_BUDGET` | Most credits one run may spend, 50 by default. `--max-credits` overrides it for one run. |
 
 - **Budget.** A run stops before any call that could take it over the budget. A 100-creator CSV usually needs 100 to 300, more when profiles link several accounts on one platform.
-- **Results** go to `output/results.jsonl`, one line per creator.
+- **Checks first.** Before it spends anything, the tool reads every row. If a row has an unknown platform or a value that is not a handle or profile link, the run does not start: it lists each bad row with its line number, so you can fix the file and run again.
+- **Results** go to `output/results.jsonl`, one line per creator. Handles are stored in lower case.
 - **Resume.** If a CSV run stops, run the same command again. Creators already finished, including ones not found on their starting platform, are skipped; creators that hit an error are tried again. A single-creator run replaces that creator's line and leaves the rest alone.
 - **Saved reports.** Every report is saved in `output/reports/`, so a rerun never pays for the same report twice. They do not expire: delete the folder to pull fresh data. The reports hold creators' contact emails, so do not commit, share or screen-record this folder.
 - **Errors.** An invalid token (`api_token_invalid`) or an empty balance (`not_enough_credits`) stops the run with the API's message. Any other failed call, such as a report for an account that no longer exists, is written to that creator's `errors` and the run goes on.

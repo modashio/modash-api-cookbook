@@ -34,7 +34,7 @@ export function idFrom(platform: Platform, value: string | null | undefined): st
   return match?.[1];
 }
 
-/** The handle in a contact, or undefined when it carries an id, points elsewhere, or is a post or tab. */
+/** The handle in a contact, in lower case, or undefined when it carries an id, points elsewhere, or is a post or tab. */
 export function handleFrom(platform: Platform, value: string | null | undefined): string | undefined {
   if (!value || idFrom(platform, value)) return undefined;
   const trimmed = value.trim();
@@ -59,7 +59,7 @@ export function handleFrom(platform: Platform, value: string | null | undefined)
   if (!first || NOT_A_PROFILE.has(first.toLowerCase())) return undefined;
   const handle = first.startsWith('@') ? first.slice(1) : first;
   if (!HANDLE_OK[platform].test(handle) || !/[\p{L}\p{N}]/u.test(handle)) return undefined;
-  return handle;
+  return handle.toLowerCase();
 }
 
 /** YouTube rows carry the current handle in `handle`; `username` there can be an older name. */
@@ -77,9 +77,8 @@ export function namesOf(row: UserRow | null | undefined): Set<string> {
 
 export type FoundAccount = UserRow & { userId: string };
 
-/** A lookup can return more than one account; keep the exact handle, and a current handle over an older name. */
-export const pickAccount = (rows: UserRow[], handle: string): FoundAccount | undefined => {
-  const wanted = handle.toLowerCase();
+/** A lookup can return more than one account; keep the exact handle, and a current handle over an older name. The handle is in lower case. */
+export const pickAccount = (rows: UserRow[], wanted: string): FoundAccount | undefined => {
   const accounts = rows.filter((row): row is FoundAccount => !!row.userId);
   return (
     accounts.find((row) => (nameOf(row) ?? '').toLowerCase() === wanted) ??

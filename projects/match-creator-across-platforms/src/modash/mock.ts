@@ -8,7 +8,7 @@ export const MOCK_HANDLES = ['example_baker', 'example_techreviews'] as const;
 
 export function fixtureKey({ method, path, query, body }: ModashRequest): string {
   let key = `${method} ${path}`;
-  if (query?.query) key += `?query=${query.query.toLowerCase()}`;
+  if (query?.query) key += `?query=${query.query}`;
   if (body !== undefined) key += ` ${JSON.stringify(body)}`;
   return key;
 }
