@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tsx src/cli.ts match-example",
+    "dev": "npm run match-example",
     "match-example": "tsx src/cli.ts match-example",
     "match-creator": "tsx src/cli.ts match-creator",
     "match-csv": "tsx src/cli.ts match-csv",

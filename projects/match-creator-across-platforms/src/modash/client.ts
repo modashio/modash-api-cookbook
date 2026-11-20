@@ -18,10 +18,17 @@ export type Transport = (request: ModashRequest) => Promise<ModashResponse>;
 
 const BASE_URL = 'https://api.modash.io/v1';
 
+/** The URL a live run sends the request to. */
+export function requestUrl({ path, query }: ModashRequest): URL {
+  const url = new URL(`${BASE_URL}/${path}`);
+  for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value);
+  return url;
+}
+
 export function liveTransport(token: string): Transport {
-  return async ({ method, path, query, body }) => {
-    const url = new URL(`${BASE_URL}/${path}`);
-    for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value);
+  return async (request) => {
+    const { method, body } = request;
+    const url = requestUrl(request);
     const response = await fetch(url, {
       method,
       headers: {

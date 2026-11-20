@@ -7,7 +7,7 @@ import { type Config, creditBudgetSchema, loadConfig } from './config.js';
 import { PLATFORMS } from './contacts.js';
 import type { MatchResult } from './creator-match.js';
 import { Matcher } from './match.js';
-import { liveTransport, ModashClient, type ModashRequest } from './modash/client.js';
+import { liveTransport, ModashClient, type ModashRequest, requestUrl } from './modash/client.js';
 import { type Fixtures, loadFixtures, MOCK_HANDLES, mockTransport } from './modash/mock.js';
 import { modashReads } from './modash/reads.js';
 import { round2 } from './numbers.js';
@@ -237,9 +237,11 @@ function creatorsFromCsv(path: string, mock: boolean): Creator[] {
 function checkCreator(platform: string, handle: string, mock: boolean): Creator {
   const creator = parseCreator(platform, handle);
   const inMockData = creator.platform === 'instagram' && (MOCK_HANDLES as readonly string[]).includes(creator.handle);
-  if (mock && !inMockData) throw new Error(
+  if (mock && !inMockData) {
+    throw new Error(
       `Mock mode has data only for instagram ${MOCK_HANDLES.join(' and ')}. A real creator needs a token: see "Run it live" in the README.`,
     );
+  }
   return creator;
 }
 
@@ -262,11 +264,11 @@ function summary(result: MatchResult, mock = false): string {
 }
 
 /** One API call as match-example prints it: the request, then what it costs on a live run. */
-function callLine({ method, path, query, body }: ModashRequest, credits: number): string {
-  const search = query ? `?${new URLSearchParams(query)}` : '';
-  const sent = body === undefined ? '' : ` ${JSON.stringify(body)}`;
+function callLine(request: ModashRequest, credits: number): string {
+  const { pathname, search } = requestUrl(request);
+  const sent = request.body === undefined ? '' : ` ${JSON.stringify(request.body)}`;
   const cost = credits === 0 ? 'free' : `${round2(credits)} ${credits === 1 ? 'credit' : 'credits'}`;
-  return `  call       ${method} /v1/${path}${search}${sent}  (${cost})`;
+  return `  call       ${request.method} ${pathname}${search}${sent}  (${cost})`;
 }
 
 export interface CsvRow {
