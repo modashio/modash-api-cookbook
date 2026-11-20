@@ -48,6 +48,8 @@ export interface ClientOptions {
   pauseMs?: number;
   /** First retry wait; later retries wait 2x, 3x, 4x this. */
   retryDelayMs?: number;
+  /** Told about each call that got an answer, with the credits it cost. */
+  onCall?: (request: ModashRequest, credits: number) => void;
 }
 
 export interface CallCost<T> {
@@ -76,6 +78,7 @@ export class ModashClient {
   readonly #budget: number;
   readonly #pauseMs: number;
   readonly #retryDelayMs: number;
+  readonly #onCall: ClientOptions['onCall'];
 
   constructor(
     private readonly transport: Transport,
@@ -84,6 +87,7 @@ export class ModashClient {
     this.#budget = options.budget;
     this.#pauseMs = options.pauseMs ?? 600;
     this.#retryDelayMs = options.retryDelayMs ?? 3_000;
+    this.#onCall = options.onCall;
   }
 
   async call<T>(request: ModashRequest, schema: z.ZodType<T>, cost: CallCost<T> = { max: 0 }): Promise<T> {
@@ -109,8 +113,9 @@ export class ModashClient {
       const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
       throw new ModashApiError(request.path, response.status, 'unexpected_response', issues);
     }
-    const actual = cost.actual ? cost.actual(parsed.data) : cost.max;
-    this.spent -= cost.max - Math.min(actual, cost.max);
+    const charged = Math.min(cost.actual ? cost.actual(parsed.data) : cost.max, cost.max);
+    this.spent -= cost.max - charged;
+    this.#onCall?.(request, charged);
     if (this.#pauseMs > 0) await sleep(this.#pauseMs);
     return parsed.data;
   }

@@ -1,0 +1,21 @@
+instagram @example_baker  (3 credits on a live run)
+  instagram  @example_baker                    100000  input
+  tiktok     @example_baker                    200000  confirmed both ways
+  youtube    @ExampleBakerKitchen               50000  confirmed both ways
+  call       GET /v1/instagram/users?query=example_baker&limit=10  (free)
+  call       GET /v1/instagram/profile/1000000001/report  (1 credit)
+  call       GET /v1/tiktok/profile/7000000000000000001/report  (1 credit)
+  call       GET /v1/youtube/profile/UCexampleBaker000000001/report  (1 credit)
+
+instagram @example_techreviews  (2.02 credits on a live run)
+  instagram  @example_techreviews             5000000  input
+  tiktok     not found
+  youtube    @exampletechreviewsold          20000000  email (hello@example.com)
+  candidate  tiktok @example_techreviews 2000000  same handle, unconfirmed
+  call       GET /v1/instagram/users?query=example_techreviews&limit=10  (free)
+  call       GET /v1/instagram/profile/1000000002/report  (1 credit)
+  call       POST /v1/email-search {"emails":["hello@example.com"]}  (0.02 credits)
+  call       GET /v1/tiktok/users?query=example_techreviews&limit=10  (free)
+  call       GET /v1/tiktok/profile/7000000000000000002/report  (1 credit)
+
+Results in output/mock-results.jsonl. This was mock mode, so nothing was spent; a live run of the same creators costs 5.02 credits.

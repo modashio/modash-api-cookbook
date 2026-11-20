@@ -7,7 +7,7 @@ import { type Config, creditBudgetSchema, loadConfig } from './config.js';
 import { PLATFORMS } from './contacts.js';
 import type { MatchResult } from './creator-match.js';
 import { Matcher } from './match.js';
-import { liveTransport, ModashClient } from './modash/client.js';
+import { liveTransport, ModashClient, type ModashRequest } from './modash/client.js';
 import { type Fixtures, loadFixtures, MOCK_HANDLES, mockTransport } from './modash/mock.js';
 import { modashReads } from './modash/reads.js';
 import { round2 } from './numbers.js';
@@ -21,7 +21,7 @@ export interface RunOptions {
 }
 
 const USAGE = `Usage:
-  npm run dev                                    mock mode: the two invented creators in handles.example.csv
+  npm run match-example [-- <handle>]            no token, no credits: the invented creators, with each API call and what it costs
   npm run match-creator -- <platform> <handle>   one creator; the handle can be a profile URL
   npm run match-csv -- <file>                    a list with the columns platform and handle; run it again to resume
 Options:
@@ -29,17 +29,17 @@ Options:
   --max-credits <n>   stop before this run could spend more than n credits (default: MODASH_CREDIT_BUDGET, or 50)
   -h, --help          print this text`;
 
-const COMMANDS = ['match-creator', 'match-csv'] as const;
+const COMMANDS = ['match-example', 'match-creator', 'match-csv'] as const;
 type Command = (typeof COMMANDS)[number];
 
 export class UsageError extends Error {}
 
-/** Where the answers come from: the demo fixtures with --mock, else the API with a token. */
+/** Where the answers come from: the demo fixtures with match-example or --mock, else the API with a token. */
 type Source = { kind: 'mock'; fixtures: Fixtures } | { kind: 'live'; apiToken: string };
 
 interface Input {
   source: Source;
-  csv: boolean;
+  command: Command;
   creators: Creator[];
   budget: number;
 }
@@ -50,8 +50,9 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
     print(USAGE);
     return 0;
   }
-  const { source, csv, creators, budget } = input;
+  const { source, command, creators, budget } = input;
   const mock = source.kind === 'mock';
+  const csv = command === 'match-csv';
 
   // Mock mode starts the file over, a CSV resumes it, and a single handle replaces its own line.
   const mode: ResultsMode = mock
@@ -63,9 +64,12 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
   const outDir = join(cwd, 'output');
   const resultsFile = join(outDir, mock ? 'mock-results.jsonl' : 'results.jsonl');
   const shown = relative(cwd, resultsFile);
+  // match-example shows the API calls behind each creator; the other commands print the match only.
+  const calls: string[] = [];
+  const onCall = command === 'match-example' ? (request: ModashRequest, credits: number) => calls.push(callLine(request, credits)) : undefined;
   const client =
     source.kind === 'mock'
-      ? new ModashClient(mockTransport(source.fixtures), { pauseMs: 0, budget })
+      ? new ModashClient(mockTransport(source.fixtures), { pauseMs: 0, budget, onCall })
       : new ModashClient(liveTransport(source.apiToken), { budget });
   const matcher = new Matcher(modashReads(client, mock ? undefined : join(outDir, 'reports')));
 
@@ -82,13 +86,15 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
       matcher,
       resultsPath: resultsFile,
       mode,
-      onResult: (result) => print(`${summary(result, mock)}\n`),
+      onResult: (result) => print(`${[summary(result, mock), ...calls.splice(0)].join('\n')}\n`),
     });
   } finally {
     process.off('SIGINT', onInterrupt);
   }
   const { ranCount, stoppedAt } = outcome;
   if (stoppedAt) {
+    // The calls the stopped creator did get an answer to, so a budget stop shows where it fell.
+    if (calls.length > 0) print(calls.join('\n'));
     print(`Stopped at @${stoppedAt.handle}: ${stoppedAt.error.message}`);
     print(`Credits this run: ${round2(client.spent)}`);
     print(`Finished creators are in ${shown}. Fix the cause above, then run the same command again to carry on.`);
@@ -107,9 +113,9 @@ export async function run({ argv, env = process.env, cwd = process.cwd(), print 
 function parseInput(argv: string[], env: NodeJS.ProcessEnv): Input | 'help' {
   const args = readArgs(argv);
   if (args === 'help') return 'help';
-  const { source, config } = checkSource(args.mock, env);
+  const { source, config } = checkSource(args.mock || args.command === 'match-example', env);
   const { creators, budget } = checkCommand(args, source, config);
-  return { source, csv: args.command === 'match-csv', creators, budget };
+  return { source, command: args.command, creators, budget };
 }
 
 interface Args {
@@ -163,7 +169,7 @@ function checkSource(mock: boolean, env: NodeJS.ProcessEnv): { source: Source; c
     }
   }
   if (!config.apiToken) {
-    throw new UsageError('Set MODASH_API_TOKEN (in .env or your shell) to run live. To try it without a token, run npm run dev.');
+    throw new UsageError('Set MODASH_API_TOKEN (in .env or your shell) to run live. To try it without a token, run npm run match-example.');
   }
   return { source: { kind: 'live', apiToken: config.apiToken }, config };
 }
@@ -180,13 +186,15 @@ function checkCommand(
   let showUsage = false;
 
   let creators: Creator[] = [];
-  if (args.length !== (csv ? 1 : 2)) {
-    const expected = csv ? 'a file' : 'a platform and a handle';
+  const expected = { 'match-example': 'one handle at most', 'match-creator': 'a platform and a handle', 'match-csv': 'a file' }[command];
+  const rightCount = command === 'match-example' ? args.length <= 1 : args.length === (csv ? 1 : 2);
+  if (!rightCount) {
     problems.push(`${command} takes ${expected}, got ${args.length === 0 ? 'nothing' : args.map((a) => `"${a}"`).join(' ')}.`);
     showUsage = true;
   } else {
     try {
-      creators = csv ? creatorsFromCsv(args[0]!, mock) : [checkCreator(args[0]!, args[1]!, mock)];
+      if (command === 'match-example') creators = (args.length === 1 ? args : MOCK_HANDLES).map((handle) => checkCreator('instagram', handle, mock));
+      else creators = csv ? creatorsFromCsv(args[0]!, mock) : [checkCreator(args[0]!, args[1]!, mock)];
     } catch (error) {
       problems.push((error as Error).message);
     }
@@ -229,7 +237,9 @@ function creatorsFromCsv(path: string, mock: boolean): Creator[] {
 function checkCreator(platform: string, handle: string, mock: boolean): Creator {
   const creator = parseCreator(platform, handle);
   const inMockData = creator.platform === 'instagram' && (MOCK_HANDLES as readonly string[]).includes(creator.handle);
-  if (mock && !inMockData) throw new Error(`Mock mode has data only for instagram ${MOCK_HANDLES.join(' and ')}.`);
+  if (mock && !inMockData) throw new Error(
+      `Mock mode has data only for instagram ${MOCK_HANDLES.join(' and ')}. A real creator needs a token: see "Run it live" in the README.`,
+    );
   return creator;
 }
 
@@ -249,6 +259,14 @@ function summary(result: MatchResult, mock = false): string {
   }
   for (const e of result.errors) lines.push(`  error: ${e}`);
   return lines.join('\n');
+}
+
+/** One API call as match-example prints it: the request, then what it costs on a live run. */
+function callLine({ method, path, query, body }: ModashRequest, credits: number): string {
+  const search = query ? `?${new URLSearchParams(query)}` : '';
+  const sent = body === undefined ? '' : ` ${JSON.stringify(body)}`;
+  const cost = credits === 0 ? 'free' : `${round2(credits)} ${credits === 1 ? 'credit' : 'credits'}`;
+  return `  call       ${method} /v1/${path}${search}${sent}  (${cost})`;
 }
 
 export interface CsvRow {

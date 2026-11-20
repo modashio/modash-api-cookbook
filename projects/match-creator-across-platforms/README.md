@@ -11,27 +11,40 @@ credits per creator.
 ```bash
 cd projects/match-creator-across-platforms
 npm install
-npm run dev
+npm run match-example
 ```
 
-Mock mode needs no token and spends nothing. It answers from two invented creators written in the
-shape the API returns (`fixtures/demo-responses.json`). It starts its results file over on every
-run, so a second `npm run dev` prints both creators again. It prints:
+`match-example` needs no token and spends nothing. It matches two invented creators from saved
+responses written in the shape the API returns (`fixtures/demo-responses.json`), and under each
+creator it lists the API calls a live run makes and what each costs. It prints:
 
 ```
 instagram @example_baker  (3 credits on a live run)
   instagram  @example_baker                    100000  input
   tiktok     @example_baker                    200000  confirmed both ways
   youtube    @ExampleBakerKitchen               50000  confirmed both ways
+  call       GET /v1/instagram/users?query=example_baker&limit=10  (free)
+  call       GET /v1/instagram/profile/1000000001/report  (1 credit)
+  call       GET /v1/tiktok/profile/7000000000000000001/report  (1 credit)
+  call       GET /v1/youtube/profile/UCexampleBaker000000001/report  (1 credit)
 
 instagram @example_techreviews  (2.02 credits on a live run)
   instagram  @example_techreviews             5000000  input
   tiktok     not found
   youtube    @exampletechreviewsold          20000000  email (hello@example.com)
   candidate  tiktok @example_techreviews 2000000  same handle, unconfirmed
+  call       GET /v1/instagram/users?query=example_techreviews&limit=10  (free)
+  call       GET /v1/instagram/profile/1000000002/report  (1 credit)
+  call       POST /v1/email-search {"emails":["hello@example.com"]}  (0.02 credits)
+  call       GET /v1/tiktok/users?query=example_techreviews&limit=10  (free)
+  call       GET /v1/tiktok/profile/7000000000000000002/report  (1 credit)
 
 Results in output/mock-results.jsonl. This was mock mode, so nothing was spent; a live run of the same creators costs 5.02 credits.
 ```
+
+`npm run match-example -- example_baker` runs one of the two. The same output is saved in
+`sample-output/match-example.txt`, with the full record for each creator beside it, so you can read
+it without installing anything. The results file starts over on every run.
 
 No API access yet? [Request an intro to the Modash API](https://www.modash.io/influencer-marketing-api?utm_source=github&utm_campaign=api_cookbook).
 
@@ -58,7 +71,7 @@ npm run match-csv -- handles.csv --max-credits 500
 
 | Variable | What it does |
 | --- | --- |
-| `MODASH_API_TOKEN` | Your token. A live run needs it. Mock mode (`npm run dev`, or `--mock`) does not. |
+| `MODASH_API_TOKEN` | Your token. A live run needs it. `npm run match-example` does not, and neither does `--mock`, which runs `match-creator` or `match-csv` on the two invented creators and prints the matches without the list of calls. |
 | `MODASH_CREDIT_BUDGET` | Most credits one run may spend, 50 by default. `--max-credits` overrides it for one run. Either must be above 0. |
 
 - **Budget.** A run stops before any call that could take it over the budget. A 100-creator CSV usually needs 100 to 300, more when profiles link several accounts on one platform.
@@ -334,7 +347,7 @@ Follower counts come from the report when the tool has one.
 | `src/results.ts` | The results file: which creators are finished, resume, one line per creator |
 | `src/config.ts` | The environment variables: token, mock mode, credit budget |
 | `src/numbers.ts` | Rounding credits to two decimals |
-| `fixtures/demo-responses.json` | What mock mode answers from: invented creators, the API's real response shape |
-| `sample-output/` | The two records mock mode produces |
+| `fixtures/demo-responses.json` | What `match-example` and `--mock` answer from: invented creators, the API's real response shape |
+| `sample-output/` | What `match-example` prints, and the two records it produces |
 | `handles.example.csv` | The CSV format for a batch run |
 | `test/` | Offline tests: `npm test` |

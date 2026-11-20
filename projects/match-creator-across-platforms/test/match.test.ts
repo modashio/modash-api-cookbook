@@ -731,6 +731,32 @@ describe('command line', () => {
     assert.equal(readFileSync(join(dir, 'output', 'mock-results.jsonl'), 'utf8').trim().split('\n').length, 2);
   });
 
+  it('match-example needs no token and prints the saved sample output', async () => {
+    assert.equal(await run({ argv: ['match-example'], env: {}, cwd: dir, print }), 0);
+    const saved = readFileSync(new URL('../sample-output/match-example.txt', import.meta.url), 'utf8');
+    assert.equal(`${lines.join('\n')}\n`, saved);
+  });
+
+  it('match-example runs one example creator by handle, and only an example creator', async () => {
+    assert.equal(await run({ argv: ['match-example', 'Example_Baker'], env: {}, cwd: dir, print }), 0);
+    assert.equal(readFileSync(join(dir, 'output', 'mock-results.jsonl'), 'utf8').trim().split('\n').length, 1);
+    assert.match(lines.join('\n'), /call {7}GET \/v1\/instagram\/profile\/1000000001\/report {2}\(1 credit\)/);
+    await assert.rejects(run({ argv: ['match-example', 'bob'], env: {}, cwd: dir, print }), /Mock mode has data only for/);
+    await assert.rejects(run({ argv: ['match-example', 'a', 'b'], env: {}, cwd: dir, print }), /match-example takes one handle at most, got "a" "b"/);
+  });
+
+  it('prints the API calls only for match-example', async () => {
+    assert.equal(await run({ argv: ['match-csv', '--mock', 'handles.example.csv'], env: {}, cwd: dir, print }), 0);
+    assert.doesNotMatch(lines.join('\n'), /call /);
+  });
+
+  it('match-example shows the calls made before the budget stopped a creator', async () => {
+    assert.equal(await run({ argv: ['match-example', '--max-credits', '3.5'], env: {}, cwd: dir, print }), 1);
+    const out = lines.join('\n');
+    assert.match(out, /users\?query=example_techreviews&limit=10 {2}\(free\)\nStopped at @example_techreviews/);
+    assert.doesNotMatch(out, /profile\/1000000002/);
+  });
+
   it('asks for a token before running on real creators', async () => {
     await assert.rejects(run({ argv: ['match-creator', 'instagram', 'someone'], env: {}, cwd: dir, print }), /MODASH_API_TOKEN/);
   });
