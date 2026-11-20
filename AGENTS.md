@@ -117,10 +117,12 @@ someone deleting the audit job in the same pull request that needs it.
 ```
 README.md                    Customer-facing intro: getting API access, credits, first call
 AGENTS.md                    This file
+CLAUDE.md                    Imports this file for Claude Code
 .cursor/skills/              Agent skills for this repo; run repo-maintenance for a health check
 projects/<project-name>/     One self-contained project per directory
   README.md                  What it does, how to run it, how it maps to the API
   AGENTS.md                  Project-specific notes (only if it adds something)
+  CLAUDE.md                  `@AGENTS.md`, only next to a project AGENTS.md
   package.json               Own dependencies; no workspace linking
   .env.example               Placeholders only
   src/
@@ -207,6 +209,7 @@ root README, and the bug-report project dropdown — not the project directory i
 - [ ] Own `README.md`: what it shows, how to run it in mock mode, how to run it with a live
       token, which Modash endpoints it hits, and what a typical session costs in credits.
 - [ ] Optional project `AGENTS.md` only if it adds project-specific notes beyond this file.
+      If you add one, add a `CLAUDE.md` next to it that holds only `@AGENTS.md`.
 - [ ] Keep the Modash HTTP layer in `src/server/modash/` (or equivalent). Never expose the
       Modash token to the browser; the frontend talks only to the project's own `/api/*`
       routes.
