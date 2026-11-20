@@ -1,0 +1,142 @@
+import type * as z from 'zod';
+
+import { CreditBudgetExceededError, ModashApiError } from './errors.js';
+
+export interface ModashRequest {
+  method: 'GET' | 'POST';
+  path: string;
+  query?: Record<string, string>;
+  body?: unknown;
+}
+
+export interface ModashResponse {
+  status: number;
+  body: unknown;
+}
+
+export type Transport = (request: ModashRequest) => Promise<ModashResponse>;
+
+const BASE_URL = 'https://api.modash.io/v1';
+
+/** The URL a live run sends the request to. */
+export function requestUrl({ path, query }: ModashRequest): URL {
+  const url = new URL(`${BASE_URL}/${path}`);
+  for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value);
+  return url;
+}
+
+export function liveTransport(token: string): Transport {
+  return async (request) => {
+    const { method, body } = request;
+    const url = requestUrl(request);
+    const response = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const text = await response.text();
+    try {
+      return { status: response.status, body: JSON.parse(text) };
+    } catch {
+      // A gateway or proxy page. It is not an answer, so `call` reports it as an error.
+      return { status: response.status, body: { error: true, code: 'not_json', message: text.slice(0, 300) } };
+    }
+  };
+}
+
+export interface ClientOptions {
+  /** The most credits this client may spend. */
+  budget: number;
+  /** Pause after each successful call, to stay under the rate limit. */
+  pauseMs?: number;
+  /** First retry wait; later retries wait 2x, 3x, 4x this. */
+  retryDelayMs?: number;
+  /** Told about each call that got an answer, with the credits it cost. */
+  onCall?: (request: ModashRequest, credits: number) => void;
+}
+
+export interface CallCost<T> {
+  /** The most this call can cost, held against the budget before it is sent. */
+  max: number;
+  /** What it actually cost, read from the response. Defaults to `max`. */
+  actual?: (data: T) => number;
+}
+
+const ATTEMPTS = 5;
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Node's fetch reports a dropped connection as TypeError('fetch failed') and a timeout as a
+// TimeoutError. Any other TypeError is a bug and should surface on the first attempt.
+const isNetworkError = (error: unknown) =>
+  (error instanceof TypeError && error.message === 'fetch failed') ||
+  (error instanceof DOMException && error.name === 'TimeoutError');
+
+// A report whose audience is not ready answers 503 `retry_later`, and the API asks for a retry in a few hours.
+const isRetryLater = (response: ModashResponse) =>
+  (response.body as { code?: unknown } | null)?.code === 'retry_later';
+
+export class ModashClient {
+  spent = 0;
+  readonly #budget: number;
+  readonly #pauseMs: number;
+  readonly #retryDelayMs: number;
+  readonly #onCall: ClientOptions['onCall'];
+
+  constructor(
+    private readonly transport: Transport,
+    options: ClientOptions,
+  ) {
+    this.#budget = options.budget;
+    this.#pauseMs = options.pauseMs ?? 600;
+    this.#retryDelayMs = options.retryDelayMs ?? 3_000;
+    this.#onCall = options.onCall;
+  }
+
+  async call<T>(request: ModashRequest, schema: z.ZodType<T>, cost: CallCost<T> = { max: 0 }): Promise<T> {
+    if (this.spent + cost.max > this.#budget + 1e-9) {
+      throw new CreditBudgetExceededError(this.#budget, this.spent);
+    }
+    this.spent += cost.max;
+    const paid = cost.max > 0;
+    // If this throws, no answer came back. A paid call may still have run and been billed, so its hold is kept.
+    const response = await this.#send(request, paid);
+
+    const body = response.body as { error?: unknown; code?: unknown; message?: unknown } | null;
+    if (response.status >= 400 || typeof body !== 'object' || body === null || body.error === true) {
+      // A 200 can be billed whatever its body says, so only an error status releases the hold.
+      if (response.status >= 400) this.spent -= cost.max;
+      const code = typeof body?.code === 'string' ? body.code : undefined;
+      const message = Array.isArray(body?.message) ? body.message.join('; ') : String(body?.message ?? '');
+      throw new ModashApiError(request.path, response.status, code, message);
+    }
+
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+      throw new ModashApiError(request.path, response.status, 'unexpected_response', issues);
+    }
+    const charged = Math.min(cost.actual ? cost.actual(parsed.data) : cost.max, cost.max);
+    this.spent -= cost.max - charged;
+    this.#onCall?.(request, charged);
+    if (this.#pauseMs > 0) await sleep(this.#pauseMs);
+    return parsed.data;
+  }
+
+  async #send(request: ModashRequest, paid: boolean): Promise<ModashResponse> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        const response = await this.transport(request);
+        if (!RETRY_STATUSES.has(response.status) || isRetryLater(response) || attempt === ATTEMPTS) return response;
+      } catch (error) {
+        // Sending a paid call again after no answer could bill it twice.
+        if (paid || !isNetworkError(error) || attempt === ATTEMPTS) throw error;
+      }
+      await sleep(this.#retryDelayMs * attempt);
+    }
+  }
+}

@@ -23,6 +23,7 @@ body:
       # see AGENTS.md § Adding a new project.
       options:
         - agentic-influencer-search
+        - match-creator-across-platforms
         - mcp-server
         - Repo-wide (README, CI, conventions)
     validations:

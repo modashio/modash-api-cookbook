@@ -1,0 +1,353 @@
+# Match one creator across Instagram, TikTok and YouTube
+
+Start with a creator's handle on one platform. Get the same person's accounts on the other two, with
+the evidence for each link, using the [Modash Discovery API](https://docs.modash.io).
+
+A small command-line tool. It runs on one creator or on a CSV of thousands, and typically costs 1 to 3
+credits per creator.
+
+## Try it with no token
+
+```bash
+cd projects/match-creator-across-platforms
+npm install
+npm run match-example
+```
+
+`match-example` needs no token and spends nothing. It matches two invented creators from saved
+responses written in the shape the API returns (`fixtures/demo-responses.json`), and under each
+creator it lists the API calls a live run makes and what each costs. It prints:
+
+```
+instagram @example_baker  (3 credits on a live run)
+  instagram  @example_baker                    100000  input
+  tiktok     @example_baker                    200000  confirmed both ways
+  youtube    @ExampleBakerKitchen               50000  confirmed both ways
+  call       GET /v1/instagram/users?query=example_baker&limit=10  (free)
+  call       GET /v1/instagram/profile/1000000001/report  (1 credit)
+  call       GET /v1/tiktok/profile/7000000000000000001/report  (1 credit)
+  call       GET /v1/youtube/profile/UCexampleBaker000000001/report  (1 credit)
+
+instagram @example_techreviews  (2.02 credits on a live run)
+  instagram  @example_techreviews             5000000  input
+  tiktok     not found
+  youtube    @exampletechreviewsold          20000000  email (hello@example.com)
+  candidate  tiktok @example_techreviews 2000000  same handle, unconfirmed
+  call       GET /v1/instagram/users?query=example_techreviews&limit=10  (free)
+  call       GET /v1/instagram/profile/1000000002/report  (1 credit)
+  call       POST /v1/email-search {"emails":["hello@example.com"]}  (0.02 credits)
+  call       GET /v1/tiktok/users?query=example_techreviews&limit=10  (free)
+  call       GET /v1/tiktok/profile/7000000000000000002/report  (1 credit)
+
+Results in output/mock-results.jsonl. This was mock mode, so nothing was spent; a live run of the same creators costs 5.02 credits.
+```
+
+`npm run match-example -- example_baker` runs one of the two. The same output is saved in
+`sample-output/match-example.txt`, with the full record for each creator beside it, so you can read
+it without installing anything. The results file starts over on every run.
+
+No API access yet? [Request an intro to the Modash API](https://www.modash.io/influencer-marketing-api?utm_source=github&utm_campaign=api_cookbook).
+
+## Run it live
+
+Node.js 22 or later.
+
+```bash
+cp .env.example .env        # then uncomment MODASH_API_TOKEN in .env and set it
+npm run match-creator -- instagram example_baker
+```
+
+Setting `MODASH_API_TOKEN` in your shell works too.
+
+The handle can also be a profile URL that shows it, such as `https://www.instagram.com/example_baker/`.
+A URL with only an id, such as `youtube.com/channel/UC...` or `tiktok.com/share/user/...`, is
+rejected: use the handle instead.
+
+For a list, make a CSV with the columns `platform` and `handle` (see `handles.example.csv`):
+
+```bash
+npm run match-csv -- handles.csv --max-credits 500
+```
+
+| Variable | What it does |
+| --- | --- |
+| `MODASH_API_TOKEN` | Your token. A live run needs it. `npm run match-example` does not, and neither does `--mock`, which runs `match-creator` or `match-csv` on the two invented creators and prints the matches without the list of calls. |
+| `MODASH_CREDIT_BUDGET` | Most credits one run may spend, 50 by default. `--max-credits` overrides it for one run. Either must be above 0. |
+
+- **Budget.** A run stops before any call that could take it over the budget. A 100-creator CSV usually needs 100 to 300, more when profiles link several accounts on one platform.
+- **Checks first.** Before it spends anything, the tool reads every row. If a row has an unknown platform or a value that is not a handle or profile link, the run does not start: it lists each bad row with its line number, so you can fix the file and run again.
+- **Results** go to `output/results.jsonl`, one line per creator. Handles are stored in lower case.
+- **Resume.** If a CSV run stops, run the same command again. Creators already finished, including ones not found on their starting platform, are skipped; creators that hit an error are tried again. A single-creator run replaces that creator's line and leaves the rest alone. A creator the budget stops partway gets no line: its reports are saved, so the rerun does not pay for them again. Ctrl-C stops a run and prints what it spent.
+- **Saved reports.** Every report is saved in `output/reports/`, so a rerun never pays for the same report twice. They do not expire: delete the folder to pull fresh data. The reports hold creators' contact emails, so do not commit, share or screen-record this folder.
+- **Errors.** An invalid token (`api_token_invalid`) or an empty balance (`not_enough_credits`) stops the run with the API's message. Any other failed call, such as a report for an account that no longer exists, is written to that creator's `errors` and the run goes on.
+
+`npm test` runs the tests offline, with no token and no network.
+
+## What you get
+
+One record per creator. Each account carries `how` it was found, so your product can set a rule for
+which matches to accept.
+
+```json
+{
+  "input": { "platform": "instagram", "handle": "example_baker" },
+  "accounts": {
+    "instagram": { "userId": "1000000001", "username": "example_baker", "followers": 100000, "how": "input" },
+    "tiktok": { "userId": "7000000000000000001", "username": "example_baker", "followers": 200000, "how": "confirmed both ways" },
+    "youtube": { "userId": "UCexampleBaker000000001", "username": "ExampleBakerKitchen", "followers": 50000, "how": "confirmed both ways" }
+  },
+  "candidates": [],
+  "missing": [],
+  "credits": 3,
+  "errors": []
+}
+```
+
+`credits` is what this run spent on the creator, not what the creator costs. A rerun that reads
+saved reports writes 0, so add up a run's credits at the time, not from this field later.
+
+The kinds of evidence, strongest first:
+
+| `how` | What it means | Suggested rule |
+| --- | --- | --- |
+| `confirmed both ways` | The starting profile links this account, and this account's own profile links back | Accept |
+| `same handle, confirmed by its profile link back` | Same handle, and its profile links to the starting account | Accept |
+| `email (...)` or `same handle, confirmed by shared email (...)` | The account lists a public email that the starting account, or an account confirmed both ways, also lists | Accept when the address is the creator's own |
+| `profile link, one way` (in `candidates`) | The starting profile links this account, and nothing points back | Show it with its evidence, let a person decide |
+| `same handle, unconfirmed` (in `candidates`) | An account with the same handle exists and nothing links the two | Never merge on this alone |
+
+`accounts` holds only matches with evidence from both sides. `candidates` holds the rest. Besides the
+two rows above, a candidate's `how` can end in `, second link` (a second account on the same platform
+that also links back), `, shared by several accounts` (an email that another account also lists, on
+this platform or on one where the creator is already matched), `, another email names a different account` (two emails point at two accounts on one
+platform), or read `same handle, report failed`.
+`emailAgrees: true` on two matched accounts means both list the same email, and no other account
+is known to list it. The terminal shows it as `+ email agrees`. It is set only on accounts whose report the tool holds. It is a second piece
+of evidence only when `how` names another reason: on `email (...)` or `same handle, confirmed by
+shared email` it is that same email.
+
+## The endpoints
+
+| Call | What it returns | Cost |
+| --- | --- | --- |
+| `GET /v1/{platform}/users?query=<handle>&limit=10` | Searches the list of influencers for the query string. Returns up to `limit` accounts, with Modash's id for each | Free |
+| `GET /v1/{platform}/profile/{userId}/report` | The creator's full profile. This tool reads `profile.contacts` | 1 credit |
+| `POST /v1/email-search` with `{"emails": [...]}` | Instagram, TikTok and YouTube accounts that list one of those emails | 0.02 credits per email that matches |
+
+`{platform}` is `instagram`, `tiktok` or `youtube`. Every call takes the header
+`Authorization: Bearer <your token>`. All of them, with their costs, live in [`src/modash/reads.ts`](./src/modash/reads.ts), and every
+request goes through [`src/modash/client.ts`](./src/modash/client.ts), which holds the budget, retries
+and error handling.
+
+The responses below show the API's shape, trimmed, for the two invented creators in the fixtures.
+
+## Step 1: turn the handle into an id
+
+The report endpoint accepts a handle or a user id. This tool works in ids, because a profile link
+that carries an id needs no lookup, and the free lookup confirms the account exists before a credit is spent.
+The lookup can return more than one account, so keep the row whose handle matches exactly. If no row
+matches, the creator is recorded as not found and nothing is spent.
+
+```bash
+curl "https://api.modash.io/v1/instagram/users?query=example_baker&limit=10" \
+  -H "Authorization: Bearer $MODASH_API_TOKEN"
+```
+
+```json
+{
+  "error": false,
+  "users": [
+    { "userId": "1000000001", "username": "example_baker", "followers": 100000 }
+  ]
+}
+```
+
+YouTube rows have a `handle` field as well as `username`. Compare both, and prefer `handle`. In the
+code that is `namesOf()`.
+
+## Step 2: read the other accounts off the report
+
+Pull the report for that id. One field, `profile.contacts`, lists the links the creator put on their
+own profile, each as a `type` and a `value`.
+
+```bash
+curl "https://api.modash.io/v1/instagram/profile/1000000001/report" \
+  -H "Authorization: Bearer $MODASH_API_TOKEN"
+```
+
+```json
+{
+  "error": false,
+  "profile": {
+    "userId": "1000000001",
+    "contacts": [
+      { "type": "youtube", "value": "https://www.youtube.com/channel/UCexampleBaker000000001" },
+      { "type": "tiktok", "value": "https://www.tiktok.com/share/user/7000000000000000001" }
+    ]
+  }
+}
+```
+
+When a contact's URL carries the other platform's account id, as both do here, that id goes straight
+to the other platform's report endpoint, with no second lookup. `idFrom()` in
+[`src/contacts.ts`](./src/contacts.ts) reads the two forms shown above:
+
+```ts
+platform === 'youtube'
+  ? /youtube\.com\/channel\/(UC[A-Za-z0-9_-]{20,})/.exec(value.replace(/youtube\.com/i, 'youtube.com'))
+  : platform === 'tiktok'
+    ? /tiktok\.com\/share\/user\/(\d+)/i.exec(value)
+    : null
+```
+
+A contact can also be a plain handle or a profile URL without an id, such as
+`youtube.com/c/ExampleBakerKitchen` or `youtube.com/@ExampleBakerKitchen/videos`. `handleFrom()` reads
+the handle from the first part of the path, or the part after `/c/` or `/user/`, ignores links to
+posts and videos, and the tool runs the free lookup on it.
+
+Contacts that are not another platform (`email`, `twitter`, `linktree`, `twitchtv`) are left alone,
+except that emails are kept for step 4.
+
+## Step 3: check each account links back
+
+A link on one profile is the creator's claim. Pull the linked account's report (1 credit) and check
+whether its own `contacts` name the account you started from. Yes means `confirmed both ways`, and it
+goes into `accounts`. No means `profile link, one way`: it goes into `candidates`, and steps 4 and 5
+still look for that platform.
+
+```bash
+curl "https://api.modash.io/v1/youtube/profile/UCexampleBaker000000001/report" \
+  -H "Authorization: Bearer $MODASH_API_TOKEN"
+```
+
+```json
+{
+  "error": false,
+  "profile": {
+    "userId": "UCexampleBaker000000001",
+    "profile": { "handle": "@ExampleBakerKitchen", "followers": 50000 },
+    "contacts": [{ "type": "instagram", "value": "https://www.instagram.com/example_baker/" }]
+  }
+}
+```
+
+The TikTok report comes back the same shape, with `"username": "example_baker"` under `profile.profile`
+and an `instagram` contact of `https://www.instagram.com/example_baker/`. Both name the Instagram we
+started from, so both are confirmed both ways.
+
+Read the account id from `profile.userId`, and on YouTube the name from `profile.profile.handle`.
+
+A link back can carry a handle or an id. `pointsBack()` compares both, against every name the starting
+account answers to, so it works whichever platform you start from, including a renamed YouTube channel.
+
+When a profile links two accounts on one platform, the tool checks both and keeps the first one that
+links back. The others go to `candidates`. Each extra link costs one more report, so a creator can cost more
+than 3 credits.
+
+## Step 4: search by email for platforms still missing
+
+If a platform is still missing, take the `email` contacts from the starting report and from accounts
+confirmed both ways, and send them to email search. Emails on an account that did not link back are
+not used, because that account may belong to someone else. Email search returns accounts on the
+three platforms that list one of the emails. The account needs at least
+0.02 credits per email sent, or the call returns `not_enough_credits`.
+
+`example_techreviews` lists no other account on Instagram, only an email:
+
+```bash
+curl -X POST "https://api.modash.io/v1/email-search" \
+  -H "Authorization: Bearer $MODASH_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"emails": ["hello@example.com"]}'
+```
+
+```json
+{
+  "matchedEmails": [
+    {
+      "email": "hello@example.com",
+      "users": [
+        { "platform": "instagram", "userId": "1000000002", "username": "example_techreviews", "followers": 5000000 },
+        { "platform": "youtube", "userId": "UCexampleTech0000000003", "username": "exampletechreviewsold", "followers": 20000000 }
+      ]
+    }
+  ],
+  "totalMatches": 1,
+  "error": false
+}
+```
+
+The tool compares ids, not names. When two accounts on one platform list the address, or an account
+other than the creator's lists it on a platform the creator is already matched on, none is accepted,
+the accounts on missing platforms go to `candidates`, and step 5 does not count that address as
+evidence. So an address that a second Instagram account also lists belongs to an agency, not to the
+creator. When two emails name two different accounts on one
+platform, both go to `candidates`.
+
+## Step 5: treat the same handle as a guess
+
+Looking up the same handle on the missing platform is free. The tool tries every name the starting
+account answers to, so a renamed YouTube channel is tried under both names. Checking what it finds
+costs 1 credit for its report. What it finds becomes a match only when its own report links back, or lists an email that
+the starting account or an account confirmed both ways also lists, and that no other account lists on
+its platform or on a platform where the creator is matched. When email search failed, no email confirms, since nothing is known about who else lists it.
+Never match on a display name.
+
+`example_techreviews` has a TikTok with the same handle. Its profile links to nothing and lists no
+email, so it stays a candidate:
+
+```json
+{
+  "candidates": [
+    { "platform": "tiktok", "userId": "7000000000000000002", "username": "example_techreviews", "followers": 2000000, "how": "same handle, unconfirmed" }
+  ],
+  "missing": ["tiktok"]
+}
+```
+
+## What it costs
+
+| Creator | Calls | Credits |
+| --- | --- | --- |
+| Profile names both other accounts (`example_baker`) | 1 lookup, 3 reports | 3 |
+| Profile names nothing, email finds one, same-handle account checked (`example_techreviews`) | 2 lookups, 2 reports, 1 email search | 2.02 |
+| Profile names nothing and no same-handle account exists | 3 lookups, 1 report | 1 |
+
+Add 1 for each extra account a profile links on the same platform, 1 for each extra same-handle
+account checked in step 5, and one free lookup per extra name when the starting account has two. For 10,000 creators that is roughly 10,000 to 30,000 credits.
+A saved report is free to read again.
+
+Calls run one after another. Each successful call is followed by a 0.6 second pause to space them out, and
+a creator takes 4 to 6 calls, so allow about 3 to 6 seconds per creator: roughly 8 to 17 hours for
+10,000.
+
+Follower counts come from the report when the tool has one.
+
+## What can go wrong
+
+- **HTTP 429 or a server error.** The tool waits 3, 6, 9 then 12 seconds and tries again. If the call still fails, it goes into that creator's `errors` and a rerun tries again.
+- **A report that is not ready.** A report answers 503 `retry_later` when the account's audience is not ready yet. The API asks for a retry in a few hours and does not charge for it, so the tool does not wait: the error goes into that creator's `errors` and a later rerun tries again.
+- **A timeout or a dropped connection.** A free call is tried again. A paid call is not, because the API may have finished it and sending it again could bill it twice. It goes into that creator's `errors`, its cost stays counted against the budget, and a rerun tries again.
+- **A linked account that no longer exists.** Its report fails. The error goes into `errors`, the platform stays `missing`, and a rerun asks again. Remove the creator from the CSV to stop retrying it.
+- **Shared agency emails.** Several creators can list the same management address. The tool only accepts an email match when one account per platform lists it, but an agency address can still join two people. Accept email matches only where the address is the creator's own, or require a second signal.
+- **Handles change.** A link to `instagram.com/oldname` points at a renamed account. The lookup then misses, and the platform stays `missing`.
+- **Short links.** `vm.tiktok.com/...`, `youtu.be/...` and `instagr.am/...` do not carry a handle or an id, so the tool skips them without an error.
+
+## Files
+
+| Path | What it is |
+| --- | --- |
+| `src/match.ts` | The method: the five steps above, in `Matcher` |
+| `src/creator-match.ts` | What the run knows about one creator: matches, candidates, reports held, and what the emails prove |
+| `src/contacts.ts` | Reading handles and ids out of profile links |
+| `src/modash/reads.ts` | The three Modash calls the method makes, with their costs, and the saved reports |
+| `src/modash/` | The HTTP layer: client with budget and retries, response schemas, errors, mock transport |
+| `src/run.ts`, `src/cli.ts` | The command line: arguments, CSV, output |
+| `src/batch.ts` | A run over many creators: skips finished ones, records each result, stops on a bad token, empty balance or spent budget |
+| `src/results.ts` | The results file: which creators are finished, resume, one line per creator |
+| `src/config.ts` | The environment variables: token, mock mode, credit budget |
+| `src/numbers.ts` | Rounding credits to two decimals |
+| `fixtures/demo-responses.json` | What `match-example` and `--mock` answer from: invented creators, the API's real response shape |
+| `sample-output/` | What `match-example` prints, and the two records it produces |
+| `handles.example.csv` | The CSV format for a batch run |
+| `test/` | Offline tests: `npm test` |

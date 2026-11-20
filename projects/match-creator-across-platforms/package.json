@@ -1,0 +1,30 @@
+{
+  "name": "modash-match-creator-across-platforms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Match one creator across Instagram, TikTok and YouTube: start from one handle and find the same person's accounts on the other platforms with the Modash Discovery API, with the evidence for each link.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "npm run match-example",
+    "match-example": "tsx src/cli.ts match-example",
+    "match-creator": "tsx src/cli.ts match-creator",
+    "match-csv": "tsx src/cli.ts match-csv",
+    "typecheck": "tsgo --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "build": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "lodash-es": "^4.18.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/lodash-es": "^4.17.12",
+    "@types/node": "^22.19.1",
+    "@typescript/native-preview": "^7.0.0-dev.20260707.2",
+    "tsx": "^4.20.6"
+  }
+}
