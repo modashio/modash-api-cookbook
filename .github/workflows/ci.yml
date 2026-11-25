@@ -59,6 +59,7 @@ jobs:
       matrix:
         project:
           - agentic-influencer-search
+          - find-creator-accounts-by-email
           - match-creator-across-platforms
           - mcp-server
     defaults:

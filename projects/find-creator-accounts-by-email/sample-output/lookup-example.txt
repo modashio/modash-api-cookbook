@@ -1,0 +1,13 @@
+emails.example.csv: 8 rows, 5 emails to check (1 blank, 1 duplicate, 1 not an email address)
+  not sent: line 6 "not an email"
+call  POST /v1/email-search {"emails":["baker@example.com","dana@example.org","talent@agency.example","sam.lee@example.net","techreviews@example.com"]}  (0.06 credits)
+baker@example.com
+  instagram  @example_baker                    100000
+  tiktok     @example_baker                    200000
+talent@agency.example  (check by hand: 2 instagram accounts list this email)
+  instagram  @example_runner                   300000
+  instagram  @example_chef                      40000
+techreviews@example.com
+  youtube    @example_techreviews            20000000
+Checked 5 emails: 3 matched, 2 with no creator account. 1 match to check by hand.
+Results in output/mock-results.jsonl. This was mock mode, so nothing was spent; a live run with these matches costs 0.06 credits.

@@ -1,0 +1,5 @@
+{"email":"baker@example.com","accounts":[{"platform":"instagram","userId":"1000000001","username":"example_baker","url":"https://www.instagram.com/example_baker/","followers":100000,"isVerified":false},{"platform":"tiktok","userId":"7000000000000000001","username":"example_baker","url":"https://www.tiktok.com/@example_baker","followers":200000,"isVerified":false}],"review":null}
+{"email":"dana@example.org","accounts":[],"review":null}
+{"email":"talent@agency.example","accounts":[{"platform":"instagram","userId":"1000000004","username":"example_runner","url":"https://www.instagram.com/example_runner/","followers":300000,"isVerified":false},{"platform":"instagram","userId":"1000000005","username":"example_chef","url":"https://www.instagram.com/example_chef/","followers":40000,"isVerified":false}],"review":"2 instagram accounts list this email"}
+{"email":"sam.lee@example.net","accounts":[],"review":null}
+{"email":"techreviews@example.com","accounts":[{"platform":"youtube","userId":"UCexampleTech0000000003","username":"example_techreviews","url":"https://www.youtube.com/channel/UCexampleTech0000000003","followers":20000000,"isVerified":true}],"review":null}
