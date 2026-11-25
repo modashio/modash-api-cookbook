@@ -1,0 +1,54 @@
+{
+  "_note": "Invented accounts, keyed by the email they list. Mock mode builds an email search answer from them in the shape the API returns; a real answer has more fields per account.",
+  "baker@example.com": [
+    {
+      "platform": "instagram",
+      "userId": "1000000001",
+      "url": "https://www.instagram.com/example_baker/",
+      "username": "example_baker",
+      "fullname": "Example Baker",
+      "followers": 100000,
+      "isVerified": false
+    },
+    {
+      "platform": "tiktok",
+      "userId": "7000000000000000001",
+      "url": "https://www.tiktok.com/@example_baker",
+      "username": "example_baker",
+      "fullname": "Example Baker",
+      "followers": 200000,
+      "isVerified": false
+    }
+  ],
+  "talent@agency.example": [
+    {
+      "platform": "instagram",
+      "userId": "1000000004",
+      "url": "https://www.instagram.com/example_runner/",
+      "username": "example_runner",
+      "fullname": "Example Runner",
+      "followers": 300000,
+      "isVerified": false
+    },
+    {
+      "platform": "instagram",
+      "userId": "1000000005",
+      "url": "https://www.instagram.com/example_chef/",
+      "username": "example_chef",
+      "fullname": "Example Chef",
+      "followers": 40000,
+      "isVerified": false
+    }
+  ],
+  "techreviews@example.com": [
+    {
+      "platform": "youtube",
+      "userId": "UCexampleTech0000000003",
+      "url": "https://www.youtube.com/channel/UCexampleTech0000000003",
+      "username": "example_techreviews",
+      "fullname": "Example Tech Reviews",
+      "followers": 20000000,
+      "isVerified": true
+    }
+  ]
+}

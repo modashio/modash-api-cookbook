@@ -23,6 +23,7 @@ body:
       # see AGENTS.md § Adding a new project.
       options:
         - agentic-influencer-search
+        - find-creator-accounts-by-email
         - match-creator-across-platforms
         - mcp-server
         - Repo-wide (README, CI, conventions)
